@@ -1,1 +1,53 @@
+.gitignore
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+*.egg-info/
+*.egg
+MANIFEST
+
+.cache/
+.pytest_cache/
+
+# Type checkers / linters
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+.python-version
+
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+*.log
+logs/**
+report/**
+data/**
+
+# SQLite / local databases
+*.sqlite3
+*.db
+
+# PyInstaller
+*.manifest
+*.spec
+
+# PEP 582
+__pypackages__/
+
+
 /config.json

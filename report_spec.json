@@ -1,0 +1,302 @@
+
+```json
+{
+  "spec_name": "report_spec",
+  "spec_version": "1.2.0",
+  "output": {
+    "format": "markdown",
+    "table_style": "pipe",
+    "null_display": "-",
+    "number_locale": "en-US"
+  },
+  "formatters": {
+    "int": { "type": "integer" },
+    "p4": { "type": "number", "decimals": 4 },
+    "usd2": { "type": "currency", "currency": "USD", "decimals": 2, "thousands_sep": true },
+    "pct2": { "type": "percent", "decimals": 2 },
+    "date": { "type": "date", "pattern": "YYYY-MM-DD" },
+    "datetime": { "type": "datetime", "pattern": "YYYY/MM/DD HH:mm:ss" },
+    "threshold_plus_p2": { "type": "custom", "template": "{value_p2}+", "value_decimals": 2 }
+  },
+  "datasets": {
+    "positions": {
+      "row_source": { "path": "$.portfolio.positions[*]" },
+      "exclude_zero_shares": true,
+      "sort": [
+        { "key": { "path": "bucket" }, "order": "asc" },
+        { "key": { "path": "ticker" }, "order": "asc" }
+      ]
+    },
+    "trades": {
+      "row_source": { "path": "$.trades[*]" },
+      "sort": [
+        { "key": { "path": "trade_date_et" }, "order": "desc" },
+        { "key": { "path": "time_tw" }, "order": "desc" }
+      ]
+    },
+    "signals": {
+      "row_source": { "path": "$.signals.tactical[*]" },
+      "sort": [{ "key": { "path": "ticker" }, "order": "asc" }]
+    },
+    "thresholds": {
+      "row_source": { "path": "$.thresholds.buy_signal_close_price_thresholds[*]" },
+      "sort": [{ "key": { "path": "ticker" }, "order": "asc" }]
+    }
+  },
+  "tables": [
+    {
+      "id": "performance_summary_v1",
+      "title": "Performance Summary",
+      "columns": [
+        { "header": "Item", "value": { "const": "" } },
+        { "header": "Value", "value": { "const": "" }, "align": "right" }
+      ],
+      "footer_rows": [
+        {
+          "kind": "info",
+          "label": "Initial Investment",
+          "cells": {
+            "Value": { "path": "$.portfolio.performance.initial_investment_usd", "format": "usd2" }
+          }
+        },
+        {
+          "kind": "info",
+          "label": "Current Holdings Market Value",
+          "cells": {
+            "Value": { "path": "$.portfolio.totals.portfolio.holdings_mv_usd", "format": "usd2" }
+          }
+        },
+        {
+          "kind": "info",
+          "label": "Cash",
+          "cells": {
+            "Value": { "path": "$.portfolio.cash.usd", "format": "usd2" }
+          }
+        },
+        {
+          "kind": "info",
+          "label": "Current Total Assets",
+          "cells": {
+            "Value": { "path": "$.portfolio.performance.current_total_assets_usd", "format": "usd2" }
+          }
+        },
+        {
+          "kind": "info",
+          "label": "Net External Cash Flow",
+          "cells": {
+            "Value": { "path": "$.portfolio.performance.net_external_cash_flow_usd", "format": "usd2" }
+          }
+        },
+        {
+          "kind": "info",
+          "label": "Effective Capital Base",
+          "cells": {
+            "Value": { "path": "$.portfolio.performance.effective_capital_base_usd", "format": "usd2" }
+          }
+        },
+        {
+          "kind": "info",
+          "label": "Total Profit",
+          "cells": {
+            "Value": { "path": "$.portfolio.performance.profit_usd", "format": "usd2" }
+          }
+        },
+        {
+          "kind": "info",
+          "label": "Total Return",
+          "cells": {
+            "Value": { "path": "$.portfolio.performance.profit_rate", "format": "pct2" }
+          }
+        }
+      ]
+    },
+    {
+      "id": "positions_status_v1",
+      "title": "Current Positions",
+      "dataset": "positions",
+      "row_computed": {
+        "bucket_label": {
+          "type": "map",
+          "source_path": "bucket",
+          "dict": {
+            "core": "Core",
+            "tactical": "Tactical",
+            "tactical_cash_pool": "Tactical(Cash Pool)"
+          },
+          "default_path": "bucket"
+        },
+        "unrealized_pnl_pct": {
+          "type": "if",
+          "cond": { "type": "gt", "left": { "path": "cost_usd" }, "right": { "const": 0 } },
+          "then": { "type": "div", "num": { "path": "unrealized_pnl_usd" }, "den": { "path": "cost_usd" } },
+          "else": { "const": null }
+        }
+      },
+      "columns": [
+        { "header": "Bucket", "value": { "path": "bucket_label" } },
+        { "header": "Ticker", "value": { "path": "ticker" } },
+        { "header": "Shares", "value": { "path": "shares" }, "format": "int", "align": "right" },
+        { "header": "Cost (USD)", "value": { "path": "cost_usd" }, "format": "usd2", "align": "right" },
+        { "header": "Price(now)", "value": { "path": "price_now" }, "format": "p4", "align": "right" },
+        { "header": "Market Value (USD)", "value": { "path": "market_value_usd" }, "format": "usd2", "align": "right" },
+        { "header": "Unrealized PnL (USD)", "value": { "path": "unrealized_pnl_usd" }, "format": "usd2", "align": "right" },
+        { "header": "Unrealized PnL %", "value": { "path": "unrealized_pnl_pct" }, "format": "pct2", "align": "right" },
+        { "header": "Notes", "value": { "path": "notes" } }
+      ],
+      "footer_rows": [
+        {
+          "kind": "subtotal",
+          "label": "Core Subtotal",
+          "cells": {
+            "Cost (USD)": { "path": "$.portfolio.totals.core.holdings_cost_usd", "format": "usd2" },
+            "Market Value (USD)": { "path": "$.portfolio.totals.core.holdings_mv_usd", "format": "usd2" },
+            "Unrealized PnL (USD)": { "path": "$.portfolio.totals.core.unrealized_pnl_usd", "format": "usd2" },
+            "Unrealized PnL %": {
+              "type": "if",
+              "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.core.holdings_cost_usd" }, "right": { "const": 0 } },
+              "then": {
+                "type": "div",
+                "num": { "path": "$.portfolio.totals.core.unrealized_pnl_usd" },
+                "den": { "path": "$.portfolio.totals.core.holdings_cost_usd" }
+              },
+              "else": { "const": null },
+              "format": "pct2"
+            }
+          }
+        },
+        {
+          "kind": "subtotal",
+          "label": "Tactical Subtotal (incl. Cash Pool)",
+          "cells": {
+            "Cost (USD)": { "path": "$.portfolio.totals.tactical.holdings_cost_usd", "format": "usd2" },
+            "Market Value (USD)": { "path": "$.portfolio.totals.tactical.holdings_mv_usd", "format": "usd2" },
+            "Unrealized PnL (USD)": { "path": "$.portfolio.totals.tactical.unrealized_pnl_usd", "format": "usd2" },
+            "Unrealized PnL %": {
+              "type": "if",
+              "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.tactical.holdings_cost_usd" }, "right": { "const": 0 } },
+              "then": {
+                "type": "div",
+                "num": { "path": "$.portfolio.totals.tactical.unrealized_pnl_usd" },
+                "den": { "path": "$.portfolio.totals.tactical.holdings_cost_usd" }
+              },
+              "else": { "const": null },
+              "format": "pct2"
+            }
+          }
+        },
+        {
+          "kind": "info",
+          "label": "Cash POOL_CASH",
+          "cells": {
+            "Market Value (USD)": { "path": "$.portfolio.cash.usd", "format": "usd2" }
+          }
+        },
+        {
+          "kind": "grand_total",
+          "label": "Portfolio Total",
+          "cells": {
+            "Cost (USD)": { "path": "$.portfolio.totals.portfolio.holdings_cost_usd", "format": "usd2" },
+            "Market Value (USD)": { "path": "$.portfolio.totals.portfolio.nav_usd", "format": "usd2" },
+            "Unrealized PnL (USD)": { "path": "$.portfolio.totals.portfolio.unrealized_pnl_usd", "format": "usd2" },
+            "Unrealized PnL %": {
+              "type": "if",
+              "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.portfolio.holdings_cost_usd" }, "right": { "const": 0 } },
+              "then": {
+                "type": "div",
+                "num": { "path": "$.portfolio.totals.portfolio.unrealized_pnl_usd" },
+                "den": { "path": "$.portfolio.totals.portfolio.holdings_cost_usd" }
+              },
+              "else": { "const": null },
+              "format": "pct2"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "signals_status_v1",
+      "title": "Signal Status",
+      "dataset": "signals",
+      "row_computed": {
+        "buy_signal_label": {
+          "type": "if",
+          "cond": { "path": "buy_signal" },
+          "then": { "const": "PASS" },
+          "else": { "const": "FAIL" }
+        }
+      },
+      "columns": [
+        { "header": "Ticker", "value": { "path": "ticker" } },
+        { "header": "Close(t)", "value": { "path": "close_t" }, "format": "p4", "align": "right" },
+        { "header": "MA Rule", "value": { "path": "ma_rule" } },
+        { "header": "MA(t)", "value": { "path": "ma_t" }, "format": "p4", "align": "right" },
+        { "header": "Close(t-5)", "value": { "path": "close_t_minus_5" }, "format": "p4", "align": "right" },
+        { "header": "Close(t)>MA(t)", "value": { "path": "close_gt_ma_label" } },
+        { "header": "Holding Days", "value": { "path": "holding_days_display" }, "align": "right" },
+        { "header": "T-5 Filter", "value": { "path": "t5_filter_label" } },
+        { "header": "Buy Signal", "value": { "path": "buy_signal_label" } },
+        { "header": "Tactical Shares (Pre-Execution)", "value": { "path": "tactical_shares_pre" }, "format": "int", "align": "right" },
+        { "header": "t+1 Action", "value": { "path": "t_plus_1_action" } },
+        { "header": "Action Shares", "value": { "path": "action_shares" }, "format": "int", "align": "right" }
+      ]
+    },
+    {
+      "id": "thresholds_pmin_v1",
+      "title": "Hypothetical t+1 Close Threshold to Trigger Buy/Sell (P_min)",
+      "dataset": "thresholds",
+      "columns": [
+        { "header": "Ticker", "value": { "path": "ticker" } },
+        { "header": "MA Rule", "value": { "path": "ma_rule" } },
+        { "header": "SUM_{n-1}", "value": { "path": "ma_sum_prev" }, "format": "usd2", "align": "right" },
+        { "header": "Close(t-5)", "value": { "path": "close_t_minus_5_next" }, "format": "p4", "align": "right" },
+        { "header": "SMA-Equivalent Threshold (strict >)", "value": { "path": "threshold_from_ma" }, "format": "p4", "align": "right" },
+        { "header": "P_min (strict >)", "value": { "path": "threshold" }, "format": "p4", "align": "right" },
+        { "header": "Display", "value": { "path": "threshold" }, "format": "threshold_plus_p2", "align": "right" }
+      ]
+    },
+    {
+      "id": "trades_details_v2",
+      "title": "Trade Details",
+      "dataset": "trades",
+      "grouping": {
+        "group_by": { "path": "trade_date_et" },
+        "order": "desc",
+        "keep_groups": {
+          "mode": "latest_full_plus_prev_simplified",
+          "latest_full_groups": 1,
+          "prev_simplified_groups": { "path": "$.config.trade_render_policy.keep_prev_trade_days_simplified", "default": 5 }
+        }
+      },
+      "column_sets": {
+        "full": [
+          { "header": "Trade ID", "value": { "path": "trade_id" }, "format": "int", "align": "right" },
+          { "header": "Ticker", "value": { "path": "ticker" } },
+          { "header": "Side", "value": { "path": "side" } },
+          { "header": "Time (TW)", "value": { "path": "time_tw" }, "format": "datetime" },
+          { "header": "Price", "value": { "path": "price" }, "format": "p4", "align": "right" },
+          { "header": "Shares", "value": { "path": "shares" }, "format": "int", "align": "right" },
+          { "header": "Gross", "value": { "path": "gross" }, "format": "usd2", "align": "right" },
+          { "header": "Fee", "value": { "path": "fee" }, "format": "usd2", "align": "right" },
+          { "header": "Cash Amount", "value": { "path": "cash_amount" }, "format": "usd2", "align": "right" },
+          { "header": "Cash Basis", "value": { "path": "cash_basis" } },
+          { "header": "Fee Rate", "value": { "path": "fee_rate_pct" }, "format": "pct2", "align": "right" },
+          { "header": "Notes", "value": { "path": "notes" } }
+        ],
+        "simple": [
+          { "header": "Trade ID", "value": { "path": "trade_id" }, "format": "int", "align": "right" },
+          { "header": "Ticker", "value": { "path": "ticker" } },
+          { "header": "Side", "value": { "path": "side" } },
+          { "header": "Time (TW)", "value": { "path": "time_tw" }, "format": "datetime" },
+          { "header": "Shares", "value": { "path": "shares" }, "format": "int", "align": "right" },
+          { "header": "Amount", "value": { "path": "cash_amount" }, "format": "usd2", "align": "right" }
+        ]
+      },
+      "group_rendering": {
+        "columns_selector": [
+          { "when": { "group_index_eq": 0 }, "use": "full" },
+          { "when": { "group_index_between": [1, 5] }, "use": "simple" }
+        ]
+      }
+    }
+  ]
+}
