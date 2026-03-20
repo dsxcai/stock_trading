@@ -1,0 +1,136 @@
+{
+  "market": {
+    "asof_t_et": "2026-03-19",
+    "prices_now": {
+      "GOOG": 305.73,
+      "SMH": 394.92,
+      "SPY": 659.8,
+      "ARKQ": 118.97,
+      "NVDA": 178.56,
+      "META": 606.7,
+      "AAPL": 250.38,
+      "AMZN": 206.84,
+      "INDA": 47.28,
+      "MSFT": 388.565,
+      "SNPS": 423.79,
+      "TSLA": 380.325
+    }
+  },
+  "portfolio": {
+    "positions": [
+      {
+        "ticker": "ARKQ",
+        "bucket": "core",
+        "shares": 70,
+        "cost_usd": 8710.07,
+        "price_now": 118.97,
+        "market_value_usd": 8327.9,
+        "unrealized_pnl_usd": -382.17,
+        "notes": "Added 37 shares intraday on 03/02",
+        "unrealized_pnl_pct": -0.0439,
+        "bucket_label": "Core"
+      },
+      {
+        "ticker": "SPY",
+        "bucket": "core",
+        "shares": 17,
+        "cost_usd": 11618.41,
+        "price_now": 659.8,
+        "market_value_usd": 11216.6,
+        "unrealized_pnl_usd": -401.81,
+        "notes": "Added 6 shares intraday on 03/02",
+        "unrealized_pnl_pct": -0.0346,
+        "bucket_label": "Core"
+      },
+      {
+        "ticker": "SMH",
+        "bucket": "tactical",
+        "shares": 29,
+        "cost_usd": 11494.64,
+        "price_now": 394.92,
+        "market_value_usd": 11452.68,
+        "unrealized_pnl_usd": -41.96,
+        "notes": "",
+        "unrealized_pnl_pct": -0.0037,
+        "bucket_label": "Tactical"
+      }
+    ],
+    "cash": {
+      "bucket": "tactical_pool",
+      "usd": 73.35,
+      "baseline_usd": 35426.5,
+      "baseline_source": "manual_cash_adjustment",
+      "derived_from_trades": true,
+      "external_cash_flow": {
+        "net_usd": -7725.46,
+        "flow_count": 2,
+        "last_flow_asof_et": "2026-03-17",
+        "last_flow_kind": "withdrawal",
+        "last_flow_amount_usd": -7007.51
+      },
+      "net_external_cash_flow_usd": -7725.46,
+      "external_flows": [
+        {
+          "amount_usd": -717.95,
+          "kind": "withdrawal",
+          "asof_et": "2026-03-12",
+          "note": "Cash withdrawal / capital reduction",
+          "ts_utc": "2026-03-13T02:55:26Z"
+        },
+        {
+          "amount_usd": -7007.51,
+          "kind": "withdrawal",
+          "asof_et": "2026-03-17",
+          "note": "Withdrawal on 3/17",
+          "ts_utc": "2026-03-17T19:55:22Z"
+        }
+      ],
+      "deployable_usd": 73.35,
+      "reserve_usd": 0.0
+    },
+    "totals": {
+      "core": {
+        "holdings_cost_usd": 20328.48,
+        "holdings_mv_usd": 19544.5,
+        "unrealized_pnl_usd": -783.98
+      },
+      "tactical": {
+        "holdings_cost_usd": 11494.64,
+        "holdings_mv_usd": 11452.68,
+        "unrealized_pnl_usd": -41.96,
+        "cash_usd": 73.35,
+        "deployable_cash_usd": 73.35,
+        "reserve_cash_usd": 0.0,
+        "total_assets_usd": 11526.03
+      },
+      "portfolio": {
+        "holdings_cost_usd": 31823.12,
+        "holdings_mv_usd": 30997.18,
+        "unrealized_pnl_usd": -825.94,
+        "cash_usd": 73.35,
+        "deployable_cash_usd": 73.35,
+        "reserve_cash_usd": 0.0,
+        "nav_usd": 31070.53
+      }
+    },
+    "performance": {
+      "initial_investment_usd": 40490.18,
+      "current_total_assets_usd": 31070.53,
+      "net_external_cash_flow_usd": -7725.46,
+      "effective_capital_base_usd": 32764.72,
+      "profit_usd": -1694.19,
+      "profit_rate": -0.0517,
+      "baseline": {
+        "net_external_cash_flow_usd": -7725.46,
+        "method": "initial_investment_plus_net_external_cash_flow",
+        "initial_investment_usd": 40490.18,
+        "effective_capital_base_usd": 32764.72
+      },
+      "returns": {
+        "current_total_assets_usd": 31070.53,
+        "profit_usd": -1694.19,
+        "profit_rate": -0.0517
+      }
+    }
+  }
+}
