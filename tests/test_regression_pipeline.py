@@ -58,6 +58,7 @@ class RegressionPipelineTests(unittest.TestCase):
             "holdings_mv_usd",
             "market_value_usd",
             "nav_usd",
+            "total_assets_usd",
             "unrealized_pnl_usd",
             "unrealized_pnl_pct",
         }

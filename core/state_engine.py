@@ -615,7 +615,7 @@ def _reprice_and_totals(states: Dict[str, Any], runtime: Dict[str, Any]) -> None
     portfolio_tot = agg({'core', 'tactical', 'tactical_cash_pool'})
     totals = portfolio.setdefault('totals', {})
     totals['core'] = core_tot
-    totals['tactical'] = {**tactical_tot, 'cash_usd': cash_usd, 'deployable_cash_usd': deployable_cash_usd, 'reserve_cash_usd': reserve_cash_usd, 'total_assets_usd': tactical_tot['holdings_mv_usd'] + cash_usd}
+    totals['tactical'] = {**tactical_tot, 'cash_usd': cash_usd, 'deployable_cash_usd': deployable_cash_usd, 'reserve_cash_usd': reserve_cash_usd, 'total_assets_usd': round_with_precision(tactical_tot['holdings_mv_usd'] + cash_usd, usd_amount_ndigits)}
     totals['portfolio'] = {**portfolio_tot, 'cash_usd': cash_usd, 'deployable_cash_usd': deployable_cash_usd, 'reserve_cash_usd': reserve_cash_usd, 'nav_usd': portfolio_tot['holdings_mv_usd'] + cash_usd}
 
 def _lookup_action_price_usd(states: Dict[str, Any], runtime: Dict[str, Any], ticker: str) -> Optional[float]:
@@ -1069,10 +1069,75 @@ def _trade_buy_total_cost_usd(t: Dict[str, Any]) -> float:
         pass
     return float(t.get('gross') or 0.0) + float(t.get('fee') or 0.0)
 
-def _apply_incremental_trades_to_portfolio(states: Dict[str, Any], runtime: Dict[str, Any], trades_delta: List[Dict[str, Any]]) -> None:
+def _fifo_lots_from_position(pos: Dict[str, Any]) -> List[Dict[str, float]]:
+    try:
+        shares = int(float(pos.get('shares') or 0))
+    except Exception:
+        shares = 0
+    try:
+        cost = float(pos.get('cost_usd') or 0.0)
+    except Exception:
+        cost = 0.0
+    if shares <= 0:
+        return []
+    return [{'shares': float(shares), 'unit_cost_usd': (cost / float(shares)) if shares > 0 else 0.0}]
+
+def _fifo_lots_total_shares(lots: List[Dict[str, float]]) -> float:
+    total = 0.0
+    for lot in lots:
+        try:
+            total += float(lot.get('shares') or 0.0)
+        except Exception:
+            continue
+    return total
+
+def _fifo_lots_total_cost(lots: List[Dict[str, float]]) -> float:
+    total = 0.0
+    for lot in lots:
+        try:
+            total += float(lot.get('shares') or 0.0) * float(lot.get('unit_cost_usd') or 0.0)
+        except Exception:
+            continue
+    return total
+
+def _fifo_lots_apply_buy(lots: List[Dict[str, float]], shares: int, total_cost_usd: float) -> None:
+    if shares <= 0:
+        return
+    lots.append({'shares': float(shares), 'unit_cost_usd': float(total_cost_usd) / float(shares)})
+
+def _fifo_lots_apply_sell(lots: List[Dict[str, float]], shares: int) -> bool:
+    remain = float(max(0, int(shares)))
+    while remain > 1e-12 and lots:
+        lot = lots[0]
+        try:
+            lot_shares = float(lot.get('shares') or 0.0)
+        except Exception:
+            lot_shares = 0.0
+        if lot_shares <= 1e-12:
+            lots.pop(0)
+            continue
+        use = min(remain, lot_shares)
+        remain -= use
+        lot_shares -= use
+        if lot_shares <= 1e-12:
+            lots.pop(0)
+        else:
+            lot['shares'] = lot_shares
+    return remain <= 1e-12
+
+def _set_position_from_fifo_lots(pos: Dict[str, Any], lots: List[Dict[str, float]], usd_amount_ndigits: int) -> None:
+    shares_now = int(round(_fifo_lots_total_shares(lots)))
+    cost_now = round_with_precision(_fifo_lots_total_cost(lots), usd_amount_ndigits) if shares_now > 0 else 0.0
+    pos['shares'] = shares_now
+    pos['cost_usd'] = cost_now
+    if shares_now <= 0:
+        pos['notes'] = ''
+
+def _apply_incremental_trades_to_portfolio_fifo(states: Dict[str, Any], runtime: Dict[str, Any], trades_delta: List[Dict[str, Any]]) -> None:
     if not trades_delta:
         return
     usd_amount_ndigits = int(_runtime_numeric_precision(runtime)["usd_amount"])
+    lots_by_ticker: Dict[str, List[Dict[str, float]]] = {}
     for t in sorted(trades_delta, key=_sort_key_trade_for_portfolio):
         ticker = str(t.get('ticker') or '').upper().strip()
         side = str(t.get('side') or '').upper().strip()
@@ -1083,31 +1148,22 @@ def _apply_incremental_trades_to_portfolio(states: Dict[str, Any], runtime: Dict
         if not ticker or shares <= 0:
             continue
         pos = _get_or_create_position(states, runtime, ticker)
-        cur_shares = int(float(pos.get('shares') or 0))
-        cur_cost = float(pos.get('cost_usd') or 0.0)
+        lots = lots_by_ticker.setdefault(ticker, _fifo_lots_from_position(pos))
         if side.startswith('B'):
-            pos['shares'] = cur_shares + shares
-            pos['cost_usd'] = round_with_precision(cur_cost + _trade_buy_total_cost_usd(t), usd_amount_ndigits)
+            _fifo_lots_apply_buy(lots, shares, _trade_buy_total_cost_usd(t))
         elif side.startswith('S'):
-            if cur_shares <= 0:
-                pos['shares'] = 0
-                pos['cost_usd'] = 0.0
-                pos['notes'] = ''
+            if _fifo_lots_total_shares(lots) <= 0:
+                lots.clear()
                 print(f'[PORTFOLIO][WARN] {ticker}: sell trade ignored for cost basis because current shares are zero.')
                 continue
-            if shares >= cur_shares:
-                pos['shares'] = 0
-                pos['cost_usd'] = 0.0
-                pos['notes'] = ''
-            else:
-                avg_cost = cur_cost / cur_shares if cur_shares > 0 else 0.0
-                new_shares = cur_shares - shares
-                new_cost = cur_cost - avg_cost * shares
-                pos['shares'] = new_shares
-                pos['cost_usd'] = round_with_precision(max(new_cost, 0.0), usd_amount_ndigits)
+            if not _fifo_lots_apply_sell(lots, shares):
+                lots.clear()
+                print(f'[PORTFOLIO][WARN] {ticker}: sell trade ignored for cost basis because current shares are zero.')
+                continue
+        _set_position_from_fifo_lots(pos, lots, usd_amount_ndigits)
     _prune_zero_share_positions(states)
 
-def _rebuild_portfolio_positions_from_day1(states: Dict[str, Any], runtime: Dict[str, Any], trades_all: List[Dict[str, Any]]) -> None:
+def _rebuild_portfolio_positions_from_day1_fifo(states: Dict[str, Any], runtime: Dict[str, Any], trades_all: List[Dict[str, Any]]) -> None:
     portfolio = states.setdefault('portfolio', {})
     positions = portfolio.setdefault('positions', [])
     if not isinstance(positions, list):
@@ -1122,7 +1178,7 @@ def _rebuild_portfolio_positions_from_day1(states: Dict[str, Any], runtime: Dict
                 pos_by_ticker[tk] = p
                 tickers.add(tk)
     usd_amount_ndigits = int(_runtime_numeric_precision(runtime)["usd_amount"])
-    state_by_ticker: Dict[str, Dict[str, float]] = {}
+    state_by_ticker: Dict[str, List[Dict[str, float]]] = {}
     if not isinstance(trades_all, list):
         trades_all = []
     for t in sorted([x for x in trades_all if isinstance(x, dict)], key=_sort_key_trade_for_portfolio):
@@ -1135,43 +1191,31 @@ def _rebuild_portfolio_positions_from_day1(states: Dict[str, Any], runtime: Dict
         if not ticker or shares <= 0:
             continue
         tickers.add(ticker)
-        st = state_by_ticker.setdefault(ticker, {'shares': 0.0, 'cost': 0.0})
-        cur_shares = float(st['shares'])
-        cur_cost = float(st['cost'])
+        lots = state_by_ticker.setdefault(ticker, [])
         if side.startswith('B'):
-            st['shares'] = cur_shares + shares
-            st['cost'] = cur_cost + _trade_buy_total_cost_usd(t)
+            _fifo_lots_apply_buy(lots, shares, _trade_buy_total_cost_usd(t))
         elif side.startswith('S'):
-            if cur_shares <= 0:
-                st['shares'] = 0.0
-                st['cost'] = 0.0
+            if _fifo_lots_total_shares(lots) <= 0:
+                lots.clear()
                 print(f'[PORTFOLIO][WARN] {ticker}: replace/day1 rebuild found sell larger than holdings; clamping to zero.')
                 continue
-            if shares >= cur_shares:
-                st['shares'] = 0.0
-                st['cost'] = 0.0
-            else:
-                avg_cost = cur_cost / cur_shares if cur_shares > 0 else 0.0
-                st['shares'] = cur_shares - shares
-                st['cost'] = max(cur_cost - avg_cost * shares, 0.0)
+            if not _fifo_lots_apply_sell(lots, shares):
+                lots.clear()
+                print(f'[PORTFOLIO][WARN] {ticker}: replace/day1 rebuild found sell larger than holdings; clamping to zero.')
+                continue
     for ticker in sorted(tickers):
         pos = pos_by_ticker.get(ticker)
         if pos is None:
             pos = {'ticker': ticker, 'bucket': _position_bucket_default(states, runtime, ticker)}
             positions.append(pos)
             pos_by_ticker[ticker] = pos
-        st = state_by_ticker.get(ticker, {'shares': 0.0, 'cost': 0.0})
-        shares_now = int(round(float(st['shares'])))
-        cost_now = round_with_precision(float(st['cost']), usd_amount_ndigits) if shares_now > 0 else 0.0
+        lots = state_by_ticker.get(ticker, [])
         pos['ticker'] = ticker
         if not str(pos.get('bucket') or '').strip():
             pos['bucket'] = _position_bucket_default(states, runtime, ticker)
-        pos['shares'] = shares_now
-        pos['cost_usd'] = cost_now
-        if shares_now <= 0:
-            pos['notes'] = ''
+        _set_position_from_fifo_lots(pos, lots, usd_amount_ndigits)
     _prune_zero_share_positions(states)
-    print('[PORTFOLIO] replace mode: rebuilt portfolio.positions from day1 trades ledger.')
+    print('[PORTFOLIO] rebuilt portfolio.positions from day1 trades ledger.')
 
 def _update_tactical_cash_from_trades_and_snapshot(states: Dict[str, Any], trades: List[Dict[str, Any]], tactical_cash_usd: Optional[float], broker_asof_et: Optional[str], usd_amount_ndigits: int, verify_tolerance_usd: float=1.0, cutoff_et_dt: Optional[datetime]=None, snapshot_kind: str='eod') -> None:
     portfolio = states.setdefault('portfolio', {})
@@ -1336,25 +1380,21 @@ def _run_main(args: argparse.Namespace) -> int:
                 mode = (args.trades_import_mode or 'append').strip().lower()
                 if mode not in ('append', 'replace'):
                     mode = 'append'
+                replaced_scope_count = 0
                 if mode == 'replace':
-                    trades, _ = _replace_trades_for_incoming_scope(trades, incoming)
-                existing_before = len(trades)
+                    trades, replaced_scope_count = _replace_trades_for_incoming_scope(trades, incoming)
                 added, dup = _upsert_trades(
                     trades,
                     incoming,
                     cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]),
                     trade_dedupe_amount_ndigits=int(numeric_precision["trade_dedupe_amount"]),
                 )
-                existing_after = len(trades)
-                incoming_added_rows = trades[max(0, existing_after - added):] if added > 0 else []
-                portfolio_delta_rows = incoming_added_rows
-                if mode == 'replace':
-                    _rebuild_portfolio_positions_from_day1(states, runtime, trades)
+                if added > 0 or replaced_scope_count > 0:
+                    _rebuild_portfolio_positions_from_day1_fifo(states, runtime, trades)
                     portfolio_delta_desc = 'day1_rebuild'
                 else:
-                    _apply_incremental_trades_to_portfolio(states, runtime, portfolio_delta_rows)
-                    portfolio_delta_desc = str(len(portfolio_delta_rows))
-                    print(f'[PORTFOLIO] {mode}: incrementally applied {len(portfolio_delta_rows)} new trade(s) to portfolio.positions')
+                    portfolio_delta_desc = '0'
+                    print(f'[PORTFOLIO] {mode}: no trade ledger changes; skipped portfolio rebuild.')
                 trade_import_runs.append({'file': import_label, 'status': 'ok', 'parsed': len(incoming), 'added': added, 'dup': dup, 'mode': mode})
                 print(f'[OK] trades import {import_label}: parsed={len(incoming)}, added={added}, dup={dup}, mode={mode}, portfolio_delta={portfolio_delta_desc}')
             except Exception as e:
@@ -1448,6 +1488,7 @@ def _run_main(args: argparse.Namespace) -> int:
         'holdings_mv_usd',
         'market_value_usd',
         'nav_usd',
+        'total_assets_usd',
         'unrealized_pnl_usd',
         'unrealized_pnl_pct',
     }, ndigits=int(numeric_precision["state_selected_fields"]))

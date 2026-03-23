@@ -600,7 +600,7 @@ def _simulate_buy_and_hold_path(
         )
         if benchmark_trades:
             trades.extend(benchmark_trades)
-            live_runtime._apply_incremental_trades_to_portfolio(states, runtime, benchmark_trades)
+            live_runtime._apply_incremental_trades_to_portfolio_fifo(states, runtime, benchmark_trades)
         cash_block = states.setdefault("portfolio", {}).setdefault("cash", {"usd": 0.0})
         reserve_cash = _round_precision(cash_block.get("reserve_usd") or 0.0, precision, "backtest_amount")
         cash_block["deployable_usd"] = _round_precision(deployable_cash, precision, "backtest_amount")
@@ -716,7 +716,7 @@ def _simulate_path(
         deployable_cash_usd = cash_usd
         if daily_trades:
             trades.extend(daily_trades)
-            live_runtime._apply_incremental_trades_to_portfolio(states, runtime, daily_trades)
+            live_runtime._apply_incremental_trades_to_portfolio_fifo(states, runtime, daily_trades)
         cash_block = states.setdefault("portfolio", {}).setdefault("cash", {"usd": 0.0})
         cash_block["deployable_usd"] = _round_precision(deployable_cash_usd, precision, "backtest_amount")
         cash_block["reserve_usd"] = _round_precision(reserve_cash_usd, precision, "backtest_amount")

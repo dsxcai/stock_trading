@@ -44,16 +44,18 @@ def _trade(
     shares: int,
     gross: float,
     fee: float,
+    side: str = "BUY",
 ) -> dict:
+    normalized_side = str(side or "BUY").upper()
     return {
         "trade_date_et": trade_date_et,
         "time_tw": time_tw,
         "ticker": ticker,
-        "side": "BUY",
+        "side": normalized_side,
         "shares": shares,
         "gross": gross,
         "fee": fee,
-        "cash_amount": gross + fee,
+        "cash_amount": (gross + fee) if normalized_side == "BUY" else max(gross - fee, 0.0),
         "cash_basis": "Total",
         "notes": f"test import {ticker}",
         "source": "test_import:fixture",
@@ -169,6 +171,64 @@ class ImportedTradesJsonTests(unittest.TestCase):
 
             trades = json.loads(trades_path.read_text(encoding="utf-8"))
             self.assertAlmostEqual(float(trades[0]["cash_amount"]), 1775.55, places=2)
+
+    def test_imported_trades_json_rebuilds_fifo_cost_basis_and_valuation_from_full_ledger(self) -> None:
+        existing = [
+            _trade("2026-03-18", "2026/03/18 21:30:00", "AAA", 1, 100.0, 1.0),
+            _trade("2026-03-18", "2026/03/18 21:31:00", "AAA", 1, 200.0, 1.0),
+            _trade("2026-03-18", "2026/03/18 21:32:00", "AAA", 1, 150.0, 1.0, side="SELL"),
+        ]
+        incoming = [
+            _trade("2026-03-20", "2026/03/20 21:33:00", "AAA", 1, 300.0, 1.0),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            states_path = tmpdir / "states.json"
+            trades_path = tmpdir / "trades.json"
+            import_path = tmpdir / "import_fifo.json"
+
+            states_path.write_text(
+                json.dumps(
+                    {
+                        "portfolio": {
+                            "positions": [
+                                {
+                                    "ticker": "AAA",
+                                    "bucket": "tactical",
+                                    "shares": 0,
+                                    "cost_usd": 0.0,
+                                    "price_now_override": 250.0,
+                                }
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            trades_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+            import_path.write_text(json.dumps(incoming, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            result = self._run_update(states_path, trades_path, import_path, "--csv-dir", str(tmpdir))
+            self.assertIn("portfolio_delta=day1_rebuild", result.stdout)
+
+            states = json.loads(states_path.read_text(encoding="utf-8"))
+            positions = states.get("portfolio", {}).get("positions", [])
+            self.assertEqual(len(positions), 1)
+            position = positions[0]
+            self.assertEqual(position["ticker"], "AAA")
+            self.assertEqual(int(position["shares"]), 2)
+            self.assertAlmostEqual(float(position["cost_usd"]), 502.0, places=2)
+            self.assertAlmostEqual(float(position["price_now"]), 250.0, places=2)
+            self.assertAlmostEqual(float(position["market_value_usd"]), 500.0, places=2)
+            self.assertAlmostEqual(float(position["unrealized_pnl_usd"]), -2.0, places=2)
+
+            portfolio_totals = states.get("portfolio", {}).get("totals", {}).get("portfolio", {})
+            self.assertAlmostEqual(float(portfolio_totals["holdings_cost_usd"]), 502.0, places=2)
+            self.assertAlmostEqual(float(portfolio_totals["holdings_mv_usd"]), 500.0, places=2)
+            self.assertAlmostEqual(float(portfolio_totals["unrealized_pnl_usd"]), -2.0, places=2)
 
     def test_imported_trades_json_replace_replaces_scope_only(self) -> None:
         existing = [
