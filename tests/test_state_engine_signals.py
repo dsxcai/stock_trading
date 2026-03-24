@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from datetime import datetime
+from pathlib import Path
+from unittest import mock
 
 from core import state_engine
 
@@ -313,6 +317,76 @@ class StateEngineSignalTests(unittest.TestCase):
         self.assertTrue(bool(row.get("sell_signal")))
         self.assertEqual(str(row.get("t_plus_1_action")), "SELL_ALL")
         self.assertEqual(int(row.get("action_shares") or 0), 10)
+
+
+class StateEngineCsvRefreshTests(unittest.TestCase):
+    @staticmethod
+    def _runtime_for_refresh() -> dict:
+        runtime = {
+            "config": {
+                "numeric_precision": _numeric_precision(),
+                "buckets": {
+                    "core": {"tickers": ["BBB"]},
+                    "tactical": {"tickers": ["CCC"], "cash_pool_ticker": "DDD"},
+                },
+                "fx_pairs": {"usd_twd": {"ticker": "TWD=X"}},
+            },
+            "history": {},
+        }
+        state_engine._ensure_trading_calendar(runtime)
+        return runtime
+
+    @staticmethod
+    def _write_csv(path: Path, *dates: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines = ["Date,Open,High,Low,Close,Volume"]
+        for idx, day in enumerate(dates, start=1):
+            lines.append(f"{day},1,1,1,{float(idx):.4f},0")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_refresh_csv_history_for_mode_updates_downloads_only_stale_active_tickers(self) -> None:
+        runtime = self._runtime_for_refresh()
+        states = {"portfolio": {"positions": [{"ticker": "AAA", "shares": 1, "cost_usd": 100.0}]}}
+        now_et = datetime.fromisoformat("2026-03-24T08:00:00-04:00")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_dir = Path(tmp)
+            self._write_csv(csv_dir / "AAA.csv", "2026-03-20")
+            self._write_csv(csv_dir / "BBB.csv", "2026-03-20", "2026-03-23")
+            self._write_csv(csv_dir / "DDD.csv", "2026-03-21")
+            with mock.patch("download_1y.yf", object()), mock.patch("download_1y.download_history") as mocked_download:
+                refreshed = state_engine._refresh_csv_history_for_mode_updates(
+                    states,
+                    runtime,
+                    csv_dir=str(csv_dir),
+                    tickers=["AAA", "BBB", "CCC", "DDD", "TWD=X"],
+                    now_et=now_et,
+                    mode_label="Premarket",
+                    refresh_policy="auto",
+                )
+
+        self.assertEqual(set(refreshed), {"AAA", "CCC", "DDD", "TWD=X"})
+        requested = [call.args[0] for call in mocked_download.call_args_list]
+        self.assertEqual(set(requested), {"AAA", "CCC", "DDD", "TWD=X"})
+        self.assertNotIn("BBB", requested)
+
+    def test_refresh_csv_history_for_mode_updates_skips_without_mode_under_auto_policy(self) -> None:
+        runtime = self._runtime_for_refresh()
+        now_et = datetime.fromisoformat("2026-03-24T08:00:00-04:00")
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("download_1y.yf", object()), mock.patch("download_1y.download_history") as mocked_download:
+                refreshed = state_engine._refresh_csv_history_for_mode_updates(
+                    {},
+                    runtime,
+                    csv_dir=tmp,
+                    tickers=["AAA"],
+                    now_et=now_et,
+                    mode_label="",
+                    refresh_policy="auto",
+                )
+
+        self.assertEqual(refreshed, [])
+        mocked_download.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -15,15 +15,15 @@
 | Cumulative Return | -6.05% |
 
 ## Current Positions
-| Bucket | Ticker | Shares | Cost (USD) | Price (Now) | Market Value (USD) | Unrealized PnL (USD) | Unrealized PnL % | Notes |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Core | ARKQ | 70 | $8,698.20 | 117.3800 | $8,216.60 | $-481.60 | -5.54% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
-| Core | SPY | 17 | $11,618.54 | 655.3800 | $11,141.46 | $-477.08 | -4.11% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
-| Tactical | SMH | 29 | $11,494.64 | 391.3600 | $11,349.44 | $-145.20 | -1.26% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
-| Core Subtotal | - | - | $20,316.74 | - | $19,358.06 | $-958.68 | -4.72% | - |
-| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,349.44 | $-145.20 | -1.26% | - |
-| Cash Pool | - | - | - | - | $73.35 | - | - | - |
-| Portfolio Total | - | - | $31,811.38 | - | $30,780.85 | $-1,103.88 | -3.47% | - |
+| Bucket | Ticker | Shares | Cost (USD) | Price (Now) | Market Value (USD) | Unrealized PnL (USD) | Unrealized PnL (TWD) | Unrealized PnL % | Unrealized PnL % (TWD) | Notes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Core | ARKQ | 70 | $8,698.20 | 117.3800 | $8,216.60 | $-481.60 | -17,860.61 | -5.54% | -6.24% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
+| Core | SPY | 17 | $11,618.54 | 655.3800 | $11,141.46 | $-477.08 | -18,499.35 | -4.11% | -4.84% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
+| Tactical | SMH | 29 | $11,494.64 | 391.3600 | $11,349.44 | $-145.20 | -5,733.24 | -1.26% | -1.52% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
+| Core Subtotal | - | - | $20,316.74 | - | $19,358.06 | $-958.68 | -36,359.96 | -4.72% | -5.44% | - |
+| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,349.44 | $-145.20 | -5,733.24 | -1.26% | -1.52% | - |
+| Cash Pool | - | - | - | - | $73.35 | - | - | - | - | - |
+| Portfolio Total | - | - | $31,811.38 | - | $30,780.85 | $-1,103.88 | -42,093.20 | -3.47% | -4.03% | - |
 
 ## Signal Status
 | Ticker | A: Close(t) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |

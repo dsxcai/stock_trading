@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--derive-signals-inputs", choices=["missing", "force", "never"], default="missing")
     parser.add_argument("--derive-threshold-inputs", choices=["missing", "force", "never"], default="missing")
     parser.add_argument("--prices-now-from", choices=["close", "never"], default="close")
+    parser.add_argument("--refresh-csv", choices=["auto", "always", "never"], default="auto", help="Whether to refresh active CSV market data before importing prices. 'auto' refreshes only when --mode is supplied.")
     parser.add_argument("--mode", default="", help="Mode for report-scoped updates, such as Premarket, Intraday, or AfterClose")
     parser.add_argument("--now-et", default="", help="Override current ET datetime for report-context resolution")
     parser.add_argument("--render-report", action="store_true", help="Render the markdown report after state updates complete")

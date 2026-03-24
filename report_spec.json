@@ -13,6 +13,7 @@
     "int": { "type": "integer" },
     "p4": { "type": "number", "decimals": 4 },
     "usd2": { "type": "currency", "currency": "USD", "decimals": 2, "thousands_sep": true },
+    "twd2": { "type": "number", "decimals": 2 },
     "pct2": { "type": "percent", "decimals": 2 },
     "date": { "type": "date", "pattern": "YYYY-MM-DD" },
     "datetime": { "type": "datetime", "pattern": "YYYY/MM/DD HH:mm:ss" },
@@ -140,7 +141,9 @@
         { "header": "Price (Now)", "value": { "path": "price_now" }, "format": "p4", "align": "right" },
         { "header": "Market Value (USD)", "value": { "path": "market_value_usd" }, "format": "usd2", "align": "right" },
         { "header": "Unrealized PnL (USD)", "value": { "path": "unrealized_pnl_usd" }, "format": "usd2", "align": "right" },
+        { "header": "Unrealized PnL (TWD)", "value": { "path": "unrealized_pnl_twd" }, "format": "twd2", "align": "right" },
         { "header": "Unrealized PnL %", "value": { "path": "unrealized_pnl_pct" }, "format": "pct2", "align": "right" },
+        { "header": "Unrealized PnL % (TWD)", "value": { "path": "unrealized_pnl_twd_pct" }, "format": "pct2", "align": "right" },
         { "header": "Notes", "value": { "path": "notes" } }
       ],
       "footer_rows": [
@@ -151,6 +154,7 @@
             "Cost (USD)": { "path": "$.portfolio.totals.core.holdings_cost_usd", "format": "usd2" },
             "Market Value (USD)": { "path": "$.portfolio.totals.core.holdings_mv_usd", "format": "usd2" },
             "Unrealized PnL (USD)": { "path": "$.portfolio.totals.core.unrealized_pnl_usd", "format": "usd2" },
+            "Unrealized PnL (TWD)": { "path": "$.portfolio.totals.core.unrealized_pnl_twd", "format": "twd2" },
             "Unrealized PnL %": {
               "type": "if",
               "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.core.holdings_cost_usd" }, "right": { "const": 0 } },
@@ -158,6 +162,17 @@
                 "type": "div",
                 "num": { "path": "$.portfolio.totals.core.unrealized_pnl_usd" },
                 "den": { "path": "$.portfolio.totals.core.holdings_cost_usd" }
+              },
+              "else": { "const": null },
+              "format": "pct2"
+            },
+            "Unrealized PnL % (TWD)": {
+              "type": "if",
+              "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.core.holdings_cost_twd" }, "right": { "const": 0 } },
+              "then": {
+                "type": "div",
+                "num": { "path": "$.portfolio.totals.core.unrealized_pnl_twd" },
+                "den": { "path": "$.portfolio.totals.core.holdings_cost_twd" }
               },
               "else": { "const": null },
               "format": "pct2"
@@ -171,6 +186,7 @@
             "Cost (USD)": { "path": "$.portfolio.totals.tactical.holdings_cost_usd", "format": "usd2" },
             "Market Value (USD)": { "path": "$.portfolio.totals.tactical.holdings_mv_usd", "format": "usd2" },
             "Unrealized PnL (USD)": { "path": "$.portfolio.totals.tactical.unrealized_pnl_usd", "format": "usd2" },
+            "Unrealized PnL (TWD)": { "path": "$.portfolio.totals.tactical.unrealized_pnl_twd", "format": "twd2" },
             "Unrealized PnL %": {
               "type": "if",
               "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.tactical.holdings_cost_usd" }, "right": { "const": 0 } },
@@ -178,6 +194,17 @@
                 "type": "div",
                 "num": { "path": "$.portfolio.totals.tactical.unrealized_pnl_usd" },
                 "den": { "path": "$.portfolio.totals.tactical.holdings_cost_usd" }
+              },
+              "else": { "const": null },
+              "format": "pct2"
+            },
+            "Unrealized PnL % (TWD)": {
+              "type": "if",
+              "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.tactical.holdings_cost_twd" }, "right": { "const": 0 } },
+              "then": {
+                "type": "div",
+                "num": { "path": "$.portfolio.totals.tactical.unrealized_pnl_twd" },
+                "den": { "path": "$.portfolio.totals.tactical.holdings_cost_twd" }
               },
               "else": { "const": null },
               "format": "pct2"
@@ -198,6 +225,7 @@
             "Cost (USD)": { "path": "$.portfolio.totals.portfolio.holdings_cost_usd", "format": "usd2" },
             "Market Value (USD)": { "path": "$.portfolio.totals.portfolio.nav_usd", "format": "usd2" },
             "Unrealized PnL (USD)": { "path": "$.portfolio.totals.portfolio.unrealized_pnl_usd", "format": "usd2" },
+            "Unrealized PnL (TWD)": { "path": "$.portfolio.totals.portfolio.unrealized_pnl_twd", "format": "twd2" },
             "Unrealized PnL %": {
               "type": "if",
               "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.portfolio.holdings_cost_usd" }, "right": { "const": 0 } },
@@ -205,6 +233,17 @@
                 "type": "div",
                 "num": { "path": "$.portfolio.totals.portfolio.unrealized_pnl_usd" },
                 "den": { "path": "$.portfolio.totals.portfolio.holdings_cost_usd" }
+              },
+              "else": { "const": null },
+              "format": "pct2"
+            },
+            "Unrealized PnL % (TWD)": {
+              "type": "if",
+              "cond": { "type": "gt", "left": { "path": "$.portfolio.totals.portfolio.holdings_cost_twd" }, "right": { "const": 0 } },
+              "then": {
+                "type": "div",
+                "num": { "path": "$.portfolio.totals.portfolio.unrealized_pnl_twd" },
+                "den": { "path": "$.portfolio.totals.portfolio.holdings_cost_twd" }
               },
               "else": { "const": null },
               "format": "pct2"

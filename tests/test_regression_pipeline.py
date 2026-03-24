@@ -198,8 +198,10 @@ class RegressionPipelineTests(unittest.TestCase):
             self.assertIn("Imported from Capital XLS (ARKQ ARKQUS) x70", current_positions)
             self.assertIn("Imported from Capital XLS (SPY SPDR標普500ETF) x17", current_positions)
             self.assertIn("Imported from Capital XLS (SMH VanEck半導體ETF) x29", current_positions)
+            self.assertIn("Unrealized PnL (TWD)", current_positions)
+            self.assertIn("Unrealized PnL % (TWD)", current_positions)
 
-    def test_premarket_pipeline_prunes_market_snapshot_to_functional_and_held_tickers(self) -> None:
+    def test_premarket_pipeline_rebuilds_market_snapshot_to_functional_held_and_fx_tickers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
             _copy_project(workdir)
@@ -235,7 +237,7 @@ class RegressionPipelineTests(unittest.TestCase):
 
             out_states = json.loads((workdir / "out_states.json").read_text(encoding="utf-8"))
             prices_now = ((out_states.get("market") or {}).get("prices_now") or {})
-            self.assertEqual(set(prices_now), {"ARKQ", "GOOG", "META", "NVDA", "SMH", "SPY"})
+            self.assertEqual(set(prices_now), {"ARKQ", "GOOG", "META", "NVDA", "SMH", "SPY", "TWD=X"})
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -36,6 +36,12 @@ def load_tickers_from_config(path: str) -> list[str]:
     """Load unique tickers from config.json."""
     config = json.loads(Path(path).read_text(encoding="utf-8"))
     tickers = config.get("tickers") or []
+    fx_pairs = ((config.get("state_engine") or {}).get("fx_pairs") or {})
+    for fx_cfg in fx_pairs.values():
+        if isinstance(fx_cfg, dict):
+            fx_ticker = str(fx_cfg.get("ticker") or "").strip()
+            if fx_ticker:
+                tickers.append(fx_ticker)
     seen: set[str] = set()
     ordered: list[str] = []
     for ticker in tickers:
@@ -72,9 +78,11 @@ def _normalize_history_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
     normalized = _flatten_download_columns(data)
     normalized = normalized.rename(columns=lambda value: str(value).title())
 
-    missing = [column for column in EXPORT_COLUMNS if column not in normalized.columns]
+    missing = [column for column in PRICE_COLUMNS if column not in normalized.columns]
     if missing:
         raise ValueError(f"Missing required columns for {ticker}: {missing}")
+    if "Volume" not in normalized.columns:
+        normalized["Volume"] = 0
 
     normalized = normalized[EXPORT_COLUMNS].copy()
     normalized[PRICE_COLUMNS] = normalized[PRICE_COLUMNS].apply(pd.to_numeric, errors="raise").round(4)
@@ -87,7 +95,14 @@ def _normalize_history_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
     return normalized
 
 
-def download_history(ticker: str, start: dt.date, end: dt.date, output_dir: Path) -> Path:
+def download_history(
+    ticker: str,
+    start: dt.date,
+    end: dt.date,
+    output_dir: Path,
+    *,
+    output_path: Optional[Path] = None,
+) -> Path:
     """Download one ticker's daily history and write it as CSV."""
     data = yf.download(
         ticker,
@@ -101,7 +116,8 @@ def download_history(ticker: str, start: dt.date, end: dt.date, output_dir: Path
         raise ValueError(f"No history returned for {ticker}")
 
     normalized = _normalize_history_frame(data, ticker)
-    csv_path = output_dir / f"{ticker}.csv"
+    csv_path = output_path if output_path is not None else (output_dir / f"{ticker}.csv")
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     normalized.to_csv(csv_path, float_format="%.4f")
     return csv_path
 

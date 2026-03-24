@@ -18,12 +18,27 @@ def _trade_note_sort_key(trade: Dict[str, Any]) -> tuple[str, str, int]:
     )
 
 
-def _open_lot_notes_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, str]:
+def _trade_buy_total_cost_usd(trade: Dict[str, Any]) -> Optional[float]:
+    for key in ("cash_amount", "amount"):
+        value = trade.get(key)
+        try:
+            if value is not None:
+                return float(value)
+        except Exception:
+            continue
+    try:
+        return float(trade.get("gross") or 0.0) + float(trade.get("fee") or 0.0)
+    except Exception:
+        return None
+
+
+def _open_lots_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     lots_by_ticker: Dict[str, List[Dict[str, Any]]] = {}
     for trade in sorted(trades, key=_trade_note_sort_key):
         ticker = str(trade.get("ticker") or "").upper().strip()
         side = str(trade.get("side") or "").upper().strip()
         note = str(trade.get("notes") or "").strip()
+        trade_date_et = str(trade.get("trade_date_et") or "").strip()
         try:
             shares = int(float(trade.get("shares") or 0))
         except Exception:
@@ -32,7 +47,17 @@ def _open_lot_notes_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, str]:
             continue
         ticker_lots = lots_by_ticker.setdefault(ticker, [])
         if side.startswith("B"):
-            ticker_lots.append({"shares": shares, "note": note})
+            total_cost_usd = _trade_buy_total_cost_usd(trade)
+            if total_cost_usd is None:
+                continue
+            ticker_lots.append(
+                {
+                    "shares": shares,
+                    "note": note,
+                    "trade_date_et": trade_date_et,
+                    "unit_cost_usd": float(total_cost_usd) / float(shares),
+                }
+            )
             continue
         if side.startswith("S"):
             remaining = shares
@@ -46,8 +71,12 @@ def _open_lot_notes_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, str]:
                     ticker_lots.pop(0)
                 else:
                     lot["shares"] = lot_shares
+    return lots_by_ticker
+
+
+def _open_lot_notes_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, str]:
     notes_by_ticker: Dict[str, str] = {}
-    for ticker, lots in lots_by_ticker.items():
+    for ticker, lots in _open_lots_by_ticker(trades).items():
         note_shares: Dict[str, int] = {}
         ordered_notes: List[str] = []
         for lot in lots:
@@ -66,6 +95,96 @@ def _open_lot_notes_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, str]:
     return notes_by_ticker
 
 
+def _usd_twd_fx_ticker(config: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(config, dict):
+        return ""
+    usd_twd_cfg = ((config.get("fx_pairs") or {}).get("usd_twd") or {})
+    if not isinstance(usd_twd_cfg, dict):
+        return ""
+    return str(usd_twd_cfg.get("ticker") or "").upper().strip()
+
+
+def _latest_close(rows: List[Dict[str, Any]]) -> Optional[float]:
+    for row in reversed(rows):
+        try:
+            close = row.get("Close")
+            if close is not None:
+                return float(close)
+        except Exception:
+            continue
+    return None
+
+
+def _close_on_or_before(rows: List[Dict[str, Any]], target_date: str) -> Optional[float]:
+    target = str(target_date or "").strip()
+    if not target:
+        return None
+    candidate: Optional[float] = None
+    for row in rows:
+        row_date = str((row or {}).get("Date") or "").strip()
+        if not row_date:
+            continue
+        if row_date > target:
+            break
+        try:
+            close = row.get("Close")
+            if close is not None:
+                candidate = float(close)
+        except Exception:
+            continue
+    return candidate
+
+
+def _position_twd_metrics(
+    position: Dict[str, Any],
+    lots: List[Dict[str, Any]],
+    fx_rows: List[Dict[str, Any]],
+) -> Optional[Dict[str, float]]:
+    current_fx = _latest_close(fx_rows)
+    if current_fx is None:
+        return None
+    try:
+        shares = float(position.get("shares") or 0.0)
+    except Exception:
+        shares = 0.0
+    if shares <= 0:
+        return None
+    market_value_usd = position.get("market_value_usd")
+    if market_value_usd is None:
+        try:
+            market_value_usd = shares * float(position.get("price_now") or 0.0)
+        except Exception:
+            market_value_usd = None
+    try:
+        if market_value_usd is None:
+            return None
+        market_value_twd = float(market_value_usd) * current_fx
+    except Exception:
+        return None
+    cost_twd = 0.0
+    for lot in lots:
+        try:
+            lot_shares = float(lot.get("shares") or 0.0)
+            unit_cost_usd = float(lot.get("unit_cost_usd") or 0.0)
+        except Exception:
+            return None
+        if lot_shares <= 0 or unit_cost_usd < 0:
+            continue
+        trade_fx = _close_on_or_before(fx_rows, str(lot.get("trade_date_et") or ""))
+        if trade_fx is None:
+            return None
+        cost_twd += lot_shares * unit_cost_usd * trade_fx
+    if cost_twd <= 0:
+        return None
+    unrealized_pnl_twd = market_value_twd - cost_twd
+    return {
+        "holdings_cost_twd": cost_twd,
+        "holdings_mv_twd": market_value_twd,
+        "unrealized_pnl_twd": unrealized_pnl_twd,
+        "unrealized_pnl_twd_pct": unrealized_pnl_twd / cost_twd,
+    }
+
+
 def build_report_root(
     states: Dict[str, Any],
     *,
@@ -73,6 +192,7 @@ def build_report_root(
     trades: Optional[List[Dict[str, Any]]] = None,
     tactical_plan: Optional[TacticalPlan] = None,
     report_meta: Optional[Dict[str, Any]] = None,
+    market_history: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build the transient render root used by report generation.
 
@@ -104,9 +224,22 @@ def build_report_root(
                 report_trades.append(dict(item))
         root["trades"] = report_trades
     if portfolio:
+        totals = portfolio.get("totals")
+        if isinstance(totals, dict):
+            portfolio["totals"] = {key: (dict(value) if isinstance(value, dict) else value) for key, value in totals.items()}
         positions = portfolio.get("positions")
         if isinstance(positions, list):
             notes_by_ticker = _open_lot_notes_by_ticker(report_trades)
+            open_lots_by_ticker = _open_lots_by_ticker(report_trades)
+            fx_ticker = _usd_twd_fx_ticker(config)
+            fx_rows = []
+            if fx_ticker and isinstance(market_history, dict):
+                fx_rows = list(((market_history.get(fx_ticker) or {}).get("rows")) or [])
+            twd_totals = {
+                "core": {"holdings_cost_twd": 0.0, "holdings_mv_twd": 0.0, "unrealized_pnl_twd": 0.0, "count": 0, "complete": True},
+                "tactical": {"holdings_cost_twd": 0.0, "holdings_mv_twd": 0.0, "unrealized_pnl_twd": 0.0, "count": 0, "complete": True},
+                "portfolio": {"holdings_cost_twd": 0.0, "holdings_mv_twd": 0.0, "unrealized_pnl_twd": 0.0, "count": 0, "complete": True},
+            }
             report_positions: List[Dict[str, Any]] = []
             for item in positions:
                 if not isinstance(item, dict):
@@ -114,8 +247,56 @@ def build_report_root(
                 position = dict(item)
                 ticker = str(position.get("ticker") or "").upper().strip()
                 position["notes"] = notes_by_ticker.get(ticker, "")
+                if fx_rows:
+                    metrics = _position_twd_metrics(
+                        position,
+                        open_lots_by_ticker.get(ticker, []),
+                        fx_rows,
+                    )
+                    if metrics is not None:
+                        position["unrealized_pnl_twd"] = metrics["unrealized_pnl_twd"]
+                        position["unrealized_pnl_twd_pct"] = metrics["unrealized_pnl_twd_pct"]
+                        bucket = str(position.get("bucket") or "").strip()
+                        bucket_targets = ["portfolio"]
+                        if bucket == "core":
+                            bucket_targets.insert(0, "core")
+                        elif bucket in {"tactical", "tactical_cash_pool"}:
+                            bucket_targets.insert(0, "tactical")
+                        for bucket_key in bucket_targets:
+                            agg = twd_totals.get(bucket_key)
+                            if not isinstance(agg, dict):
+                                continue
+                            agg["holdings_cost_twd"] += metrics["holdings_cost_twd"]
+                            agg["holdings_mv_twd"] += metrics["holdings_mv_twd"]
+                            agg["unrealized_pnl_twd"] += metrics["unrealized_pnl_twd"]
+                            agg["count"] += 1
+                    else:
+                        bucket = str(position.get("bucket") or "").strip()
+                        bucket_targets = ["portfolio"]
+                        if bucket == "core":
+                            bucket_targets.insert(0, "core")
+                        elif bucket in {"tactical", "tactical_cash_pool"}:
+                            bucket_targets.insert(0, "tactical")
+                        for bucket_key in bucket_targets:
+                            agg = twd_totals.get(bucket_key)
+                            if isinstance(agg, dict):
+                                agg["complete"] = False
                 report_positions.append(position)
             portfolio["positions"] = report_positions
+            totals = portfolio.get("totals")
+            if isinstance(totals, dict) and fx_rows:
+                for bucket_key, agg in twd_totals.items():
+                    bucket_totals = totals.get(bucket_key)
+                    if not isinstance(bucket_totals, dict):
+                        continue
+                    if int(agg.get("count") or 0) <= 0 or not bool(agg.get("complete")):
+                        continue
+                    holdings_cost_twd = float(agg["holdings_cost_twd"])
+                    unrealized_pnl_twd = float(agg["unrealized_pnl_twd"])
+                    bucket_totals["holdings_cost_twd"] = holdings_cost_twd
+                    bucket_totals["holdings_mv_twd"] = float(agg["holdings_mv_twd"])
+                    bucket_totals["unrealized_pnl_twd"] = unrealized_pnl_twd
+                    bucket_totals["unrealized_pnl_twd_pct"] = (unrealized_pnl_twd / holdings_cost_twd) if holdings_cost_twd > 0 else None
         root["portfolio"] = portfolio
     if isinstance(report_meta, dict):
         root["_report_meta"] = dict(report_meta)

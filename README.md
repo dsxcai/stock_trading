@@ -233,7 +233,7 @@ Trade details are now externalized into `trades.json` by default:
 - `states.json` retains summary outputs and per-mode snapshots, and no longer stores `meta.trades_file` or `meta.trades_count`
 - `trades.json` retains transaction-level trade records
 
-In addition, historical price data is now loaded directly from `data/*.csv` on each execution, rather than storing a long-lived OHLCV block such as `history_400d` inside `states.json`.
+In addition, historical price data is now loaded directly from `data/*.csv` on each execution, rather than storing a long-lived OHLCV block such as `history_400d` inside `states.json`. This includes configured FX pairs such as `state_engine.fx_pairs.usd_twd -> TWD=X`, which are downloaded alongside equity CSVs and can be used for report-only currency analytics.
 
 Also, `states.json` no longer embeds a `config` block and no longer stores `market.csv_sources`, `meta.doc`, `meta.timezone`, `meta.trades_file`, or `meta.trades_count`. These are loaded from external `config.json` at runtime.
 
@@ -334,6 +334,7 @@ python3 generate_report.py --states states.json --trades-file trades.json --sche
 Purpose: use an existing snapshot together with `data/*.csv` to compute the tactical plan on demand and generate the report for the specified mode.
 
 This command must explicitly include `--mode`.
+When `update_states.py` is run with `--mode`, it now attempts an automatic CSV refresh first. The refresh scope is limited to functionally active tickers: current holdings, strategy tickers, and configured FX pairs such as `TWD=X`.
 
 ### 6.6 Tactical simulation / backtest
 
@@ -514,6 +515,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | `--states`        | Specify the state file                                       |
 | `--out`           | Specify the output state file                                |
 | `--csv-dir`       | Specify the market price CSV directory; defaults to `./data` if omitted |
+| `--refresh-csv`   | Control automatic CSV refresh before a mode update. `auto` is the default and refreshes only the active tickers needed by current holdings, strategy logic, and configured FX pairs |
 | `--report-schema` | Specify the report schema                                    |
 | `--report-dir`    | Specify the report output directory                          |
 | `--report-out`    | Directly specify the report output filename                  |
@@ -556,6 +558,7 @@ Imported trade rounding is controlled by `config.json` under `state_engine.numer
 
 After imported trades are merged, `portfolio.positions` is rebuilt from the full trade ledger. Remaining position cost basis follows FIFO. This trade-ledger rebuild applies to holdings only; `market.prices_now` is rebuilt separately from loaded CSV history.
 Current-position notes shown in reports are derived from the surviving FIFO lots behind each holding, aggregating the unique non-empty trade notes that still compose the remaining shares and appending the remaining share count for each note, such as `AA x2 | BB x7`. They are not persisted in `portfolio.positions`.
+The `Current Positions` table also includes `Unrealized PnL (TWD)` and `Unrealized PnL % (TWD)`. They are computed only at report-build time by converting each surviving FIFO buy lot with the USD/TWD close on or before its buy date, then comparing that TWD cost basis with the current position market value translated by the latest USD/TWD close.
 
 ### 10.6 When `--mode` is mandatory
 

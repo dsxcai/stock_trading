@@ -502,11 +502,19 @@ def _build_report_output(
     trades: Optional[List[Dict[str, Any]]] = None,
     tactical_plan: Optional[Any] = None,
     report_meta: Optional[Dict[str, Any]] = None,
+    market_history: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str]:
     from core.reporting import load_schema as _load_report_schema, render_report as _render_report_markdown
 
     schema = _load_report_schema(schema_path)
-    report_root = build_report_root(states, config=config, trades=trades, tactical_plan=tactical_plan, report_meta=report_meta)
+    report_root = build_report_root(
+        states,
+        config=config,
+        trades=trades,
+        tactical_plan=tactical_plan,
+        report_meta=report_meta,
+        market_history=market_history,
+    )
     md = _render_report_markdown(report_root, schema, mode)
     meta = dict(report_meta or {})
     if not meta:
@@ -713,6 +721,12 @@ def _discover_tickers_from_config(states: Dict[str, Any], runtime: Dict[str, Any
         tickers.append(str(cash_pool))
     tickers += list((buckets.get('tactical_cash_pool') or {}).get('tickers', []))
     tickers += list((cfg.get('tactical_indicators') or {}).keys())
+    for fx_cfg in ((cfg.get('fx_pairs') or {}).values()):
+        if not isinstance(fx_cfg, dict):
+            continue
+        fx_ticker = str(fx_cfg.get('ticker') or '').strip()
+        if fx_ticker:
+            tickers.append(fx_ticker)
     for p in (states.get('portfolio', {}) or {}).get('positions', []) or []:
         t = p.get('ticker')
         if t:
@@ -799,6 +813,111 @@ def _resolve_csv_candidates(runtime: Dict[str, Any], csv_dir: str, ticker: str) 
             out.append(p)
             seen.add(p)
     return out
+
+def _csv_date_bounds(csv_path: str) -> Tuple[Optional[date], Optional[date]]:
+    p = Path(str(csv_path or '').strip())
+    if not p.exists():
+        return (None, None)
+    first: Optional[date] = None
+    last: Optional[date] = None
+    try:
+        with p.open('r', encoding='utf-8', newline='') as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                raw = str((row or {}).get('Date') or '').strip()
+                if not raw:
+                    continue
+                try:
+                    day = _parse_ymd_loose(raw)
+                except Exception:
+                    continue
+                if first is None:
+                    first = day
+                last = day
+    except Exception:
+        return (None, None)
+    return (first, last)
+
+def _latest_completed_market_day_et(runtime: Dict[str, Any], now_et: datetime) -> str:
+    today = now_et.date()
+    if _is_trading_day_et(runtime, today) and _session_class_for_now_et(runtime, now_et) == 'afterclose':
+        return today.isoformat()
+    return _prev_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
+
+def _refresh_csv_history_for_mode_updates(
+    states: Dict[str, Any],
+    runtime: Dict[str, Any],
+    *,
+    csv_dir: str,
+    tickers: List[str],
+    now_et: datetime,
+    mode_label: str,
+    refresh_policy: str='auto',
+) -> List[str]:
+    policy = str(refresh_policy or 'auto').strip().lower()
+    if policy not in {'auto', 'always', 'never'}:
+        raise ValueError(f'unsupported refresh policy: {refresh_policy}')
+    if policy == 'never':
+        print('[AUTOCSV] skipped: refresh policy is never.')
+        return []
+    if policy == 'auto' and not str(mode_label or '').strip():
+        print('[AUTOCSV] skipped: no --mode supplied.')
+        return []
+    target_end_et = _latest_completed_market_day_et(runtime, now_et)
+    target_end = date.fromisoformat(target_end_et)
+    default_start = target_end - timedelta(days=370)
+    active_tickers: List[str] = []
+    seen = set()
+    for ticker in tickers or []:
+        ticker_norm = str(ticker or '').upper().strip()
+        if not ticker_norm or ticker_norm in seen:
+            continue
+        active_tickers.append(ticker_norm)
+        seen.add(ticker_norm)
+    stale_specs: List[Tuple[str, Path, date, Optional[date], Optional[date]]] = []
+    for ticker in active_tickers:
+        candidates = _resolve_csv_candidates(runtime, csv_dir, ticker)
+        existing_path = next((candidate for candidate in candidates if os.path.exists(candidate)), '')
+        chosen_path = existing_path or (candidates[0] if candidates else os.path.join(csv_dir, f'{ticker}.csv'))
+        first_date, last_date = _csv_date_bounds(chosen_path)
+        if last_date is not None and last_date >= target_end:
+            continue
+        start_date = first_date or default_start
+        stale_specs.append((ticker, Path(chosen_path), start_date, first_date, last_date))
+    if not stale_specs:
+        print(f'[AUTOCSV] skipped: {len(active_tickers)} active ticker(s) already cover target end date {target_end_et}.')
+        return []
+    from download_1y import download_history, yf
+    if yf is None:
+        msg = '[AUTOCSV] yfinance is not installed; automatic CSV refresh skipped.'
+        if policy == 'always':
+            print(f'[ABORT] {msg}')
+            raise SystemExit(2)
+        print(f'[WARN] {msg}')
+        return []
+    refreshed: List[str] = []
+    failures: List[str] = []
+    csv_root = Path(csv_dir)
+    csv_root.mkdir(parents=True, exist_ok=True)
+    for ticker, output_path, start_date, first_date, last_date in stale_specs:
+        before = last_date.isoformat() if last_date is not None else 'missing'
+        try:
+            download_history(
+                ticker,
+                start_date,
+                target_end + timedelta(days=1),
+                csv_root,
+                output_path=output_path,
+            )
+            refreshed.append(ticker)
+            print(f'[AUTOCSV] refreshed {ticker}: previous_last={before}, target_end={target_end_et}, start={start_date.isoformat()}, path={output_path}')
+        except Exception as exc:
+            failures.append(ticker)
+            print(f'[WARN] [AUTOCSV] {ticker}: refresh failed: {exc}')
+    if failures and policy == 'always':
+        print(f'[ABORT] automatic CSV refresh failed for: {", ".join(failures)}')
+        raise SystemExit(1)
+    return refreshed
 
 def _import_csvs_into_states(states: Dict[str, Any], runtime: Dict[str, Any], csv_dir: str, tickers: List[str], prices_now_from: str, keep_history_rows: int, persist_market_snapshot: bool=True) -> List[ImportResult]:
     market = states.setdefault('market', {})
@@ -1402,6 +1521,15 @@ def _run_main(args: argparse.Namespace) -> int:
     else:
         print('[INFO] running without --mode; only imported-trades/cash/initial-investment updates will be applied.')
     tickers = [t.strip().upper() for t in args.tickers.split(',') if t.strip()] if args.tickers.strip() else _discover_tickers_from_config(states, runtime)
+    _refresh_csv_history_for_mode_updates(
+        states,
+        runtime,
+        csv_dir=args.csv_dir,
+        tickers=tickers,
+        now_et=now_et,
+        mode_label=mode_label,
+        refresh_policy=str(getattr(args, 'refresh_csv', 'auto') or 'auto'),
+    )
     keep_history_rows = args.keep_history_rows if args.keep_history_rows > 0 else _compute_keep_history_rows(states, runtime)
     out_path = args.out.strip()
     if not out_path:
@@ -1516,7 +1644,13 @@ def _run_main(args: argparse.Namespace) -> int:
         print('[MISMATCH] Broker verification failed beyond tolerance, but continuing.')
         for m in mismatches:
             print('  -', m)
-    report_root = build_report_root(states, config=_runtime_config(runtime), trades=trades, tactical_plan=tactical_plan)
+    report_root = build_report_root(
+        states,
+        config=_runtime_config(runtime),
+        trades=trades,
+        tactical_plan=tactical_plan,
+        market_history=_runtime_history(runtime),
+    )
     if mode_label:
         warns = _ensure_report_fields(report_root)
         if warns:
@@ -1541,7 +1675,18 @@ def _run_main(args: argparse.Namespace) -> int:
     report_md = None
     report_out_path = None
     if args.render_report:
-        report_md, report_out_path = _build_report_output(states, schema_path=str(args.report_schema), report_dir=str(args.report_dir), report_out=str(args.report_out), mode=mode_label, config=_runtime_config(runtime), trades=trades, tactical_plan=tactical_plan, report_meta=report_meta)
+        report_md, report_out_path = _build_report_output(
+            states,
+            schema_path=str(args.report_schema),
+            report_dir=str(args.report_dir),
+            report_out=str(args.report_out),
+            mode=mode_label,
+            config=_runtime_config(runtime),
+            trades=trades,
+            tactical_plan=tactical_plan,
+            report_meta=report_meta,
+            market_history=_runtime_history(runtime),
+        )
     _strip_persisted_report_transients(states)
     trades_to_save: List[Dict[str, Any]] = []
     for t in trades:

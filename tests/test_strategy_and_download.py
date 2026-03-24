@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from core.strategy import _allocate_buy_shares_across_triggered_signals, _calc_threshold_row, _read_ohlcv_csv
-from download_1y import _normalize_history_frame
+from download_1y import _normalize_history_frame, load_tickers_from_config
 
 
 class StrategyAndDownloadTests(unittest.TestCase):
@@ -81,6 +81,32 @@ class StrategyAndDownloadTests(unittest.TestCase):
             "2022-12-06,147.0700,147.3000,141.9200,142.9100,64727200\n"
             "2022-12-07,142.1900,143.3700,140.0000,140.9400,69721100\n",
         )
+
+    def test_normalize_history_frame_fills_missing_volume_for_fx_series(self) -> None:
+        index = pd.to_datetime(["2026-03-20", "2026-03-23"])
+        frame = pd.DataFrame(
+            [
+                [32.7400, 32.7600, 32.7100, 32.7300],
+                [32.6800, 32.7000, 32.6500, 32.6800],
+            ],
+            index=index,
+            columns=["Open", "High", "Low", "Close"],
+        )
+        normalized = _normalize_history_frame(frame, "TWD=X")
+        self.assertEqual(list(normalized.columns), ["Open", "High", "Low", "Close", "Volume"])
+        self.assertEqual(normalized["Volume"].tolist(), [0, 0])
+
+    def test_load_tickers_from_config_includes_configured_fx_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(
+                '{'
+                '"tickers": ["SPY", "SMH"], '
+                '"state_engine": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}}'
+                '}',
+                encoding="utf-8",
+            )
+            self.assertEqual(load_tickers_from_config(str(config_path)), ["SPY", "SMH", "TWD=X"])
 
 
 if __name__ == "__main__":

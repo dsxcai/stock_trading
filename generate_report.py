@@ -90,7 +90,14 @@ def main() -> None:
         schema = load_schema(args.schema)
         report_date = args.date.strip() or _report_date_from_meta(report_meta) or report_date_default(states, args.mode)
         output_path = args.out.strip() or str(Path(args.out_dir) / f"{report_date}_{runtime._normalize_mode_key(args.mode)}.md")
-        report_root = build_report_root(states, config=config, trades=trades, tactical_plan=tactical_plan, report_meta=report_meta)
+        report_root = build_report_root(
+            states,
+            config=config,
+            trades=trades,
+            tactical_plan=tactical_plan,
+            report_meta=report_meta,
+            market_history=engine_runtime.get("history"),
+        )
         markdown = render_report(report_root, schema, args.mode)
         Path(output_path).write_text(markdown, encoding="utf-8")
         logger.info(f"[OK] wrote {output_path}")

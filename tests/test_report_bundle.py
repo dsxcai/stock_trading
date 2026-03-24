@@ -73,6 +73,50 @@ class ReportBundleTests(unittest.TestCase):
         self.assertEqual(positions["BBB"]["notes"], "")
         self.assertEqual(states, baseline)
 
+    def test_build_report_root_derives_twd_unrealized_metrics_from_surviving_lots(self) -> None:
+        states = {
+            "portfolio": {
+                "positions": [
+                    {
+                        "ticker": "AAA",
+                        "bucket": "tactical",
+                        "shares": 2,
+                        "cost_usd": 240.0,
+                        "price_now": 150.0,
+                        "market_value_usd": 300.0,
+                    }
+                ],
+                "cash": {},
+                "totals": {"core": {}, "tactical": {}, "portfolio": {}},
+            }
+        }
+
+        report_root = build_report_root(
+            states,
+            config={"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            trades=[
+                {"trade_id": 1, "ticker": "AAA", "trade_date_et": "2026-03-01", "time_tw": "2026/03/01 22:00:00", "side": "BUY", "shares": 1, "cash_amount": 100.0, "notes": "first lot"},
+                {"trade_id": 2, "ticker": "AAA", "trade_date_et": "2026-03-06", "time_tw": "2026/03/06 22:00:00", "side": "BUY", "shares": 2, "cash_amount": 240.0, "notes": "second lot"},
+                {"trade_id": 3, "ticker": "AAA", "trade_date_et": "2026-03-10", "time_tw": "2026/03/10 21:00:00", "side": "SELL", "shares": 1, "cash_amount": 130.0, "notes": "sell"},
+            ],
+            market_history={
+                "TWD=X": {
+                    "rows": [
+                        {"Date": "2026-03-01", "Close": 32.0},
+                        {"Date": "2026-03-06", "Close": 33.0},
+                        {"Date": "2026-03-10", "Close": 34.0},
+                    ]
+                }
+            },
+        )
+
+        position = report_root["portfolio"]["positions"][0]
+        self.assertEqual(position["notes"], "second lot x2")
+        self.assertAlmostEqual(position["unrealized_pnl_twd"], (300.0 * 34.0) - (240.0 * 33.0))
+        self.assertAlmostEqual(position["unrealized_pnl_twd_pct"], (300.0 * 34.0 - 240.0 * 33.0) / (240.0 * 33.0))
+        self.assertAlmostEqual(report_root["portfolio"]["totals"]["tactical"]["unrealized_pnl_twd"], (300.0 * 34.0) - (240.0 * 33.0))
+        self.assertAlmostEqual(report_root["portfolio"]["totals"]["portfolio"]["unrealized_pnl_twd"], (300.0 * 34.0) - (240.0 * 33.0))
+
     def test_build_report_root_loads_trade_notes_for_all_current_positions(self) -> None:
         states = json.loads((REPO_ROOT / "tests" / "fixtures" / "golden_premarket_states.json").read_text(encoding="utf-8"))
         trades = json.loads((REPO_ROOT / "tests" / "fixtures" / "golden_premarket_trades.json").read_text(encoding="utf-8"))
