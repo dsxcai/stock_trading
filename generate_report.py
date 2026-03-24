@@ -15,6 +15,8 @@ from core.state_engine import (
     _ensure_trading_calendar,
     _import_csvs_into_states,
     _load_runtime_config,
+    _rebuild_market_snapshot_from_history,
+    _reprice_and_totals,
     _report_date_from_meta,
     _resolve_runtime_report_meta,
 )
@@ -67,6 +69,8 @@ def main() -> None:
         runtime._migrate_state_schema(states)
         _ensure_trading_calendar(engine_runtime)
         _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+        report_meta = _resolve_runtime_report_meta(engine_runtime, args.mode, report_date=args.date)
+        engine_runtime["report_meta"] = dict(report_meta)
         tickers = _discover_tickers_from_config(states, engine_runtime)
         keep_history_rows = _compute_keep_history_rows(states, engine_runtime)
         _import_csvs_into_states(
@@ -78,6 +82,8 @@ def main() -> None:
             keep_history_rows=keep_history_rows,
             persist_market_snapshot=False,
         )
+        _rebuild_market_snapshot_from_history(states, engine_runtime)
+        _reprice_and_totals(states, engine_runtime)
         tactical_plan = compute_tactical_plan(
             states,
             engine_runtime,
@@ -86,7 +92,6 @@ def main() -> None:
             mode=args.mode,
             trades=trades,
         )
-        report_meta = _resolve_runtime_report_meta(engine_runtime, args.mode, report_date=args.date)
         schema = load_schema(args.schema)
         report_date = args.date.strip() or _report_date_from_meta(report_meta) or report_date_default(states, args.mode)
         output_path = args.out.strip() or str(Path(args.out_dir) / f"{report_date}_{runtime._normalize_mode_key(args.mode)}.md")

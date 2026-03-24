@@ -1,14 +1,14 @@
 {
   "market": {
-    "asof_t_et": "2026-03-23",
+    "asof_t_et": "2026-03-24",
     "prices_now": {
-      "SPY": 655.38,
-      "ARKQ": 117.38,
-      "GOOG": 299.02,
-      "SMH": 391.36,
-      "NVDA": 175.64,
-      "META": 604.06,
-      "TWD=X": 32.68
+      "SPY": 670.79,
+      "ARKQ": 121.85,
+      "GOOG": 309.41,
+      "SMH": 396.88,
+      "NVDA": 181.93,
+      "META": 622.66,
+      "TWD=X": 31.922
     }
   },
   "portfolio": {
@@ -18,10 +18,10 @@
         "bucket": "core",
         "shares": 70,
         "cost_usd": 8698.2,
-        "price_now": 117.38,
-        "market_value_usd": 8216.6,
-        "unrealized_pnl_usd": -481.6,
-        "unrealized_pnl_pct": -0.0554,
+        "price_now": 121.85,
+        "market_value_usd": 8529.5,
+        "unrealized_pnl_usd": -168.7,
+        "unrealized_pnl_pct": -0.0194,
         "bucket_label": "Core"
       },
       {
@@ -29,10 +29,10 @@
         "bucket": "core",
         "shares": 17,
         "cost_usd": 11618.54,
-        "price_now": 655.38,
-        "market_value_usd": 11141.46,
-        "unrealized_pnl_usd": -477.08,
-        "unrealized_pnl_pct": -0.0411,
+        "price_now": 670.79,
+        "market_value_usd": 11403.43,
+        "unrealized_pnl_usd": -215.11,
+        "unrealized_pnl_pct": -0.0185,
         "bucket_label": "Core"
       },
       {
@@ -40,10 +40,10 @@
         "bucket": "tactical",
         "shares": 29,
         "cost_usd": 11494.64,
-        "price_now": 391.36,
-        "market_value_usd": 11349.44,
-        "unrealized_pnl_usd": -145.2,
-        "unrealized_pnl_pct": -0.0126,
+        "price_now": 396.88,
+        "market_value_usd": 11509.52,
+        "unrealized_pnl_usd": 14.88,
+        "unrealized_pnl_pct": 0.0013,
         "bucket_label": "Tactical"
       }
     ],
@@ -83,35 +83,35 @@
     "totals": {
       "core": {
         "holdings_cost_usd": 20316.74,
-        "holdings_mv_usd": 19358.06,
-        "unrealized_pnl_usd": -958.68
+        "holdings_mv_usd": 19932.93,
+        "unrealized_pnl_usd": -383.81
       },
       "tactical": {
         "holdings_cost_usd": 11494.64,
-        "holdings_mv_usd": 11349.44,
-        "unrealized_pnl_usd": -145.2,
+        "holdings_mv_usd": 11509.52,
+        "unrealized_pnl_usd": 14.88,
         "cash_usd": 73.35,
         "deployable_cash_usd": 73.35,
         "reserve_cash_usd": 0.0,
-        "total_assets_usd": 11422.79
+        "total_assets_usd": 11582.87
       },
       "portfolio": {
         "holdings_cost_usd": 31811.38,
-        "holdings_mv_usd": 30707.5,
-        "unrealized_pnl_usd": -1103.88,
+        "holdings_mv_usd": 31442.45,
+        "unrealized_pnl_usd": -368.93,
         "cash_usd": 73.35,
         "deployable_cash_usd": 73.35,
         "reserve_cash_usd": 0.0,
-        "nav_usd": 30780.85
+        "nav_usd": 31515.8
       }
     },
     "performance": {
       "initial_investment_usd": 40490.18,
-      "current_total_assets_usd": 30780.85,
+      "current_total_assets_usd": 31515.8,
       "net_external_cash_flow_usd": -7725.46,
       "effective_capital_base_usd": 32764.72,
-      "profit_usd": -1983.87,
-      "profit_rate": -0.0605,
+      "profit_usd": -1248.92,
+      "profit_rate": -0.0381,
       "baseline": {
         "net_external_cash_flow_usd": -7725.46,
         "method": "initial_investment_plus_net_external_cash_flow",
@@ -119,9 +119,9 @@
         "effective_capital_base_usd": 32764.72
       },
       "returns": {
-        "current_total_assets_usd": 30780.85,
-        "profit_usd": -1983.87,
-        "profit_rate": -0.0605
+        "current_total_assets_usd": 31515.8,
+        "profit_usd": -1248.92,
+        "profit_rate": -0.0381
       }
     }
   }

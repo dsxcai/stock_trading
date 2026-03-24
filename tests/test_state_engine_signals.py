@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from core import state_engine
+from core.tactical_engine import compute_tactical_plan
 
 
 def _numeric_precision() -> dict:
@@ -317,6 +318,99 @@ class StateEngineSignalTests(unittest.TestCase):
         self.assertTrue(bool(row.get("sell_signal")))
         self.assertEqual(str(row.get("t_plus_1_action")), "SELL_ALL")
         self.assertEqual(int(row.get("action_shares") or 0), 10)
+
+    def test_selected_market_close_uses_mode_specific_history_day(self) -> None:
+        rows = [
+            {"Date": "2026-03-24", "Close": 100.0},
+            {"Date": "2026-03-25", "Close": 110.0},
+        ]
+        intraday_runtime = {
+            "config": {"numeric_precision": _numeric_precision(), "fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            "report_meta": {
+                "mode": "Intraday",
+                "mode_key": "intraday",
+                "signal_basis": {"t_et": "2026-03-25", "basis": "NYSE Intraday"},
+            },
+        }
+        premarket_runtime = {
+            "config": {"numeric_precision": _numeric_precision(), "fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            "report_meta": {
+                "mode": "Premarket",
+                "mode_key": "premarket",
+                "signal_basis": {"t_et": "2026-03-24", "basis": "NYSE Close"},
+            },
+        }
+
+        self.assertEqual(
+            state_engine._selected_market_close_for_runtime(intraday_runtime, "AAA", rows),
+            ("2026-03-25", 110.0),
+        )
+        self.assertEqual(
+            state_engine._selected_market_close_for_runtime(premarket_runtime, "AAA", rows),
+            ("2026-03-24", 100.0),
+        )
+        self.assertEqual(
+            state_engine._selected_market_close_for_runtime(premarket_runtime, "TWD=X", rows),
+            ("2026-03-25", 110.0),
+        )
+
+    def test_compute_tactical_plan_filters_history_by_signal_basis_day(self) -> None:
+        states = {
+            "market": {"signals_inputs": {}, "next_close_threshold_inputs": {}},
+            "portfolio": {"positions": [], "cash": {"usd": 0.0, "deployable_usd": 0.0, "reserve_usd": 0.0}},
+        }
+        history = {
+            "AAA": {
+                "rows": [
+                    {"Date": "2026-03-18", "Close": 95.0},
+                    {"Date": "2026-03-19", "Close": 96.0},
+                    {"Date": "2026-03-20", "Close": 97.0},
+                    {"Date": "2026-03-21", "Close": 98.0},
+                    {"Date": "2026-03-24", "Close": 99.0},
+                    {"Date": "2026-03-25", "Close": 110.0},
+                ]
+            }
+        }
+        intraday_runtime = {
+            "config": _signal_config({"AAA": "SMA2"}),
+            "history": history,
+            "report_meta": {
+                "mode": "Intraday",
+                "mode_key": "intraday",
+                "signal_basis": {"t_et": "2026-03-25", "basis": "NYSE Intraday"},
+            },
+        }
+        premarket_runtime = {
+            "config": _signal_config({"AAA": "SMA2"}),
+            "history": history,
+            "report_meta": {
+                "mode": "Premarket",
+                "mode_key": "premarket",
+                "signal_basis": {"t_et": "2026-03-24", "basis": "NYSE Close"},
+            },
+        }
+
+        intraday_plan = compute_tactical_plan(
+            states,
+            intraday_runtime,
+            derive_signals_inputs="force",
+            derive_threshold_inputs="never",
+            mode="Intraday",
+            trades=[],
+        )
+        premarket_plan = compute_tactical_plan(
+            states,
+            premarket_runtime,
+            derive_signals_inputs="force",
+            derive_threshold_inputs="never",
+            mode="Premarket",
+            trades=[],
+        )
+
+        self.assertEqual(intraday_plan.signals_inputs["AAA"]["close_t"], 110.0)
+        self.assertEqual(intraday_plan.signals_inputs["AAA"]["close_t_minus_5"], 95.0)
+        self.assertEqual(premarket_plan.signals_inputs["AAA"]["close_t"], 99.0)
+        self.assertEqual(premarket_plan.signals_inputs["AAA"]["close_t_minus_5"], None)
 
 
 class StateEngineCsvRefreshTests(unittest.TestCase):

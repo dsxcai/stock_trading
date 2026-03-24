@@ -117,6 +117,79 @@ class ReportBundleTests(unittest.TestCase):
         self.assertAlmostEqual(report_root["portfolio"]["totals"]["tactical"]["unrealized_pnl_twd"], (300.0 * 34.0) - (240.0 * 33.0))
         self.assertAlmostEqual(report_root["portfolio"]["totals"]["portfolio"]["unrealized_pnl_twd"], (300.0 * 34.0) - (240.0 * 33.0))
 
+    def test_build_report_root_marks_intraday_same_day_prices_as_estimated(self) -> None:
+        states = {
+            "portfolio": {
+                "positions": [
+                    {"ticker": "AAA", "bucket": "tactical", "shares": 2, "cost_usd": 200.0},
+                ],
+                "cash": {},
+                "totals": {"core": {}, "tactical": {}, "portfolio": {}},
+            }
+        }
+
+        report_root = build_report_root(
+            states,
+            config={"tactical_indicators": {"AAA": "SMA2"}},
+            report_meta={
+                "mode": "Intraday",
+                "mode_key": "intraday",
+                "signal_basis": {"t_et": "2026-03-25", "basis": "NYSE Intraday"},
+            },
+            market_history={
+                "AAA": {
+                    "rows": [
+                        {"Date": "2026-03-24", "Close": 100.0},
+                        {"Date": "2026-03-25", "Close": 110.0},
+                    ]
+                }
+            },
+        )
+
+        price_notes = (report_root.get("_report_meta") or {}).get("price_notes") or []
+        self.assertEqual(
+            price_notes,
+            ["Estimated Price: Intraday current positions and signal trigger use same-day CSV prices when available (AAA)."],
+        )
+
+    def test_build_report_root_marks_premarket_twd_fx_as_estimated(self) -> None:
+        states = {
+            "portfolio": {
+                "positions": [
+                    {"ticker": "AAA", "bucket": "core", "shares": 1, "cost_usd": 100.0, "price_now": 101.0},
+                ],
+                "cash": {},
+                "totals": {"core": {}, "tactical": {}, "portfolio": {}},
+            }
+        }
+
+        report_root = build_report_root(
+            states,
+            config={"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            trades=[
+                {"trade_id": 1, "ticker": "AAA", "trade_date_et": "2026-03-17", "time_tw": "2026/03/17 22:00:00", "side": "BUY", "shares": 1, "cash_amount": 100.0, "notes": "lot"},
+            ],
+            report_meta={
+                "mode": "Premarket",
+                "mode_key": "premarket",
+                "signal_basis": {"t_et": "2026-03-17", "basis": "NYSE Close"},
+            },
+            market_history={
+                "TWD=X": {
+                    "rows": [
+                        {"Date": "2026-03-17", "Close": 32.0},
+                        {"Date": "2026-03-24", "Close": 33.0},
+                    ]
+                }
+            },
+        )
+
+        price_notes = (report_root.get("_report_meta") or {}).get("price_notes") or []
+        self.assertEqual(
+            price_notes,
+            ["Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24."],
+        )
+
     def test_build_report_root_loads_trade_notes_for_all_current_positions(self) -> None:
         states = json.loads((REPO_ROOT / "tests" / "fixtures" / "golden_premarket_states.json").read_text(encoding="utf-8"))
         trades = json.loads((REPO_ROOT / "tests" / "fixtures" / "golden_premarket_trades.json").read_text(encoding="utf-8"))

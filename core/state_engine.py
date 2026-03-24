@@ -73,6 +73,25 @@ def _runtime_history(runtime: Dict[str, Any]) -> Dict[str, Any]:
         runtime['history'] = hist
     return hist
 
+def _runtime_report_meta(runtime: Dict[str, Any]) -> Dict[str, Any]:
+    meta = runtime.get('report_meta')
+    return dict(meta) if isinstance(meta, dict) else {}
+
+def _runtime_mode_key(runtime: Dict[str, Any]) -> str:
+    meta = _runtime_report_meta(runtime)
+    return _normalize_mode_key(meta.get('mode_key') or meta.get('mode'))
+
+def _runtime_signal_basis_day(runtime: Dict[str, Any]) -> Optional[str]:
+    meta = _runtime_report_meta(runtime)
+    signal_basis = meta.get('signal_basis') or {}
+    signal_day = str(signal_basis.get('t_et') or '').strip()
+    if not signal_day:
+        return None
+    try:
+        return _to_yyyy_mm_dd(signal_day)
+    except Exception:
+        return None
+
 def _save_json(obj: Dict[str, Any], path: str) -> str:
     payload = json.dumps(obj, ensure_ascii=False, indent=2)
     p = Path(path)
@@ -597,7 +616,9 @@ def _reprice_and_totals(states: Dict[str, Any], runtime: Dict[str, Any]) -> None
         elif ticker in prices_now and prices_now[ticker] is not None:
             p['price_now'] = float(prices_now[ticker])
         elif ticker in history and history[ticker].get('rows'):
-            p['price_now'] = float(history[ticker]['rows'][-1]['Close'])
+            _, selected_close = _selected_market_close_for_runtime(runtime, str(ticker), history[ticker].get('rows') or [])
+            if selected_close is not None:
+                p['price_now'] = float(selected_close)
         shares = float(p.get('shares') or 0.0)
         cost = float(p.get('cost_usd') or 0.0)
         price = p.get('price_now')
@@ -656,9 +677,7 @@ def _lookup_action_price_usd(states: Dict[str, Any], runtime: Dict[str, Any], ti
             else:
                 market_px = (market.get('prices_now') or {}).get(ticker)
                 if market_px is None and (history.get(ticker) or {}).get('rows'):
-                    rows = history[ticker].get('rows') or []
-                    if rows:
-                        market_px = rows[-1].get('Close')
+                    _, market_px = _selected_market_close_for_runtime(runtime, ticker, (history.get(ticker) or {}).get('rows') or [])
                 if market_px is None:
                     return pos_price
         break
@@ -670,10 +689,12 @@ def _lookup_action_price_usd(states: Dict[str, Any], runtime: Dict[str, Any], ti
             pass
     rows = (history.get(ticker) or {}).get('rows') or []
     if rows:
-        try:
-            return float(rows[-1].get('Close'))
-        except Exception:
-            pass
+        _, selected_close = _selected_market_close_for_runtime(runtime, ticker, rows)
+        if selected_close is not None:
+            try:
+                return float(selected_close)
+            except Exception:
+                pass
     for p in positions:
         if str(p.get('ticker') or '').upper() == ticker:
             try:
@@ -684,6 +705,9 @@ def _lookup_action_price_usd(states: Dict[str, Any], runtime: Dict[str, Any], ti
 
 def _current_signal_day_et(states: Dict[str, Any], runtime: Dict[str, Any], mode: Optional[str]=None) -> Optional[str]:
     candidates: List[Any] = []
+    runtime_signal_day = _runtime_signal_basis_day(runtime)
+    if runtime_signal_day:
+        candidates.append(runtime_signal_day)
     if mode:
         snap = _get_mode_snapshot(states, mode)
         if snap:
@@ -735,6 +759,52 @@ def _discover_tickers_from_config(states: Dict[str, Any], runtime: Dict[str, Any
     tickers = [t for t in tickers if t and (not (t.upper() in seen or seen.add(t.upper())))]
     return [t.upper() for t in tickers]
 
+def _fx_tickers_from_config(runtime: Dict[str, Any]) -> set[str]:
+    tickers: set[str] = set()
+    for fx_cfg in ((_runtime_config(runtime).get('fx_pairs') or {}).values()):
+        if not isinstance(fx_cfg, dict):
+            continue
+        fx_ticker = str(fx_cfg.get('ticker') or '').upper().strip()
+        if fx_ticker:
+            tickers.add(fx_ticker)
+    return tickers
+
+def _history_rows_on_or_before(rows: List[Dict[str, Any]], asof_et: Optional[str]) -> List[Dict[str, Any]]:
+    if not asof_et:
+        return list(rows or [])
+    try:
+        asof_d = _parse_ymd_loose(asof_et)
+    except Exception:
+        asof_d = None
+    if asof_d is None:
+        return list(rows or [])
+    kept: List[Dict[str, Any]] = []
+    for row in rows or []:
+        row_date = _parse_ymd_loose(str((row or {}).get('Date') or ''))
+        if row_date is None:
+            continue
+        if row_date <= asof_d:
+            kept.append(row)
+        else:
+            break
+    return kept
+
+def _selected_market_close_for_runtime(runtime: Dict[str, Any], ticker: str, rows: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[float]]:
+    if not rows:
+        return (None, None)
+    ticker_norm = str(ticker or '').upper().strip()
+    if ticker_norm in _fx_tickers_from_config(runtime):
+        row = rows[-1]
+        return (str(row.get('Date') or ''), _safe_float(row.get('Close')))
+    signal_day = _runtime_signal_basis_day(runtime)
+    if signal_day:
+        filtered = _history_rows_on_or_before(rows, signal_day)
+        if filtered:
+            row = filtered[-1]
+            return (str(row.get('Date') or ''), _safe_float(row.get('Close')))
+    row = rows[-1]
+    return (str(row.get('Date') or ''), _safe_float(row.get('Close')))
+
 def _rebuild_market_snapshot_from_history(states: Dict[str, Any], runtime: Dict[str, Any], tickers: Optional[List[str]]=None) -> None:
     market = states.setdefault('market', {})
     history = _runtime_history(runtime)
@@ -748,17 +818,15 @@ def _rebuild_market_snapshot_from_history(states: Dict[str, Any], runtime: Dict[
         rows = ((history.get(ticker_norm) or {}).get('rows') or [])
         if not rows:
             continue
-        last_row = rows[-1] if isinstance(rows[-1], dict) else {}
-        last_close = last_row.get('Close')
+        selected_date, selected_close = _selected_market_close_for_runtime(runtime, ticker_norm, rows)
         try:
-            if last_close is None:
+            if selected_close is None:
                 continue
-            new_prices_now[ticker_norm] = float(last_close)
+            new_prices_now[ticker_norm] = float(selected_close)
         except Exception:
             continue
-        last_date = str(last_row.get('Date') or '').strip()
-        if last_date:
-            imported_dates.append(last_date)
+        if selected_date:
+            imported_dates.append(selected_date)
     old_prices_now = market.get('prices_now') or {}
     removed = []
     if isinstance(old_prices_now, dict):
@@ -1518,6 +1586,7 @@ def _run_main(args: argparse.Namespace) -> int:
             print('[ABORT] No state update and no report file were generated.')
             raise SystemExit(2)
         report_meta = _report_meta_from_context(resolved_ctx)
+        runtime['report_meta'] = dict(report_meta)
     else:
         print('[INFO] running without --mode; only imported-trades/cash/initial-investment updates will be applied.')
     tickers = [t.strip().upper() for t in args.tickers.split(',') if t.strip()] if args.tickers.strip() else _discover_tickers_from_config(states, runtime)

@@ -1,43 +1,44 @@
 # Daily Investment Report (Premarket)
 - Signal Basis: t=2026-03-17 (NYSE Close)
 - Execution Basis: t+1=2026-03-18 (NYSE Trading Day)
+- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24.
 
 ## Performance Summary
 | Item | Value |
 | --- | ---: |
 | Initial Investment | $40,490.18 |
-| Current Holdings Market Value | $30,707.50 |
+| Current Holdings Market Value | $31,442.45 |
 | Cash Position | $73.35 |
-| Current Total Assets | $30,780.85 |
+| Current Total Assets | $31,515.80 |
 | Net External Cash Flow | $-7,725.46 |
 | Effective Capital Base | $32,764.72 |
-| Cumulative Profit | $-1,983.87 |
-| Cumulative Return | -6.05% |
+| Cumulative Profit | $-1,248.92 |
+| Cumulative Return | -3.81% |
 
 ## Current Positions
 | Bucket | Ticker | Shares | Cost (USD) | Price (Now) | Market Value (USD) | Unrealized PnL (USD) | Unrealized PnL (TWD) | Unrealized PnL % | Unrealized PnL % (TWD) | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Core | ARKQ | 70 | $8,698.20 | 117.3800 | $8,216.60 | $-481.60 | -17,860.61 | -5.54% | -6.24% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
-| Core | SPY | 17 | $11,618.54 | 655.3800 | $11,141.46 | $-477.08 | -18,499.35 | -4.11% | -4.84% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
-| Tactical | SMH | 29 | $11,494.64 | 391.3600 | $11,349.44 | $-145.20 | -5,733.24 | -1.26% | -1.52% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
-| Core Subtotal | - | - | $20,316.74 | - | $19,358.06 | $-958.68 | -36,359.96 | -4.72% | -5.44% | - |
-| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,349.44 | $-145.20 | -5,733.24 | -1.26% | -1.52% | - |
+| Core | ARKQ | 70 | $8,698.20 | 121.8500 | $8,529.50 | $-168.70 | -627.98 | -1.94% | -0.23% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
+| Core | SPY | 17 | $11,618.54 | 670.7900 | $11,403.43 | $-215.11 | -947.39 | -1.85% | -0.26% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
+| Tactical | SMH | 29 | $11,494.64 | 396.8800 | $11,509.52 | $14.88 | -301.44 | 0.13% | -0.08% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
+| Core Subtotal | - | - | $20,316.74 | - | $19,932.93 | $-383.81 | -1,575.37 | -1.89% | -0.25% | - |
+| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,509.52 | $14.88 | -301.44 | 0.13% | -0.08% | - |
 | Cash Pool | - | - | - | - | $73.35 | - | - | - | - | - |
-| Portfolio Total | - | - | $31,811.38 | - | $30,780.85 | $-1,103.88 | -42,093.20 | -3.47% | -4.03% | - |
+| Portfolio Total | - | - | $31,811.38 | - | $31,515.80 | $-368.93 | -1,876.81 | -1.16% | -0.19% | - |
 
 ## Signal Status
 | Ticker | A: Close(t) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |
 | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: |
-| GOOG | 299.0200 | SMA50 | 317.4964 | 304.4200 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
-| NVDA | 175.6400 | SMA50 | 184.4124 | 183.2200 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
-| SMH | 391.3600 | SMA100 | 378.8853 | 393.9200 | TRUE | FALSE | FALSE | 29 | SELL_ALL | 29 |
+| GOOG | 309.4100 | SMA50 | 318.9058 | 306.9300 | FALSE | TRUE | FALSE | 0 | NO_ACTION | 0 |
+| NVDA | 181.9300 | SMA50 | 185.2566 | 184.7700 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
+| SMH | 396.8800 | SMA100 | 377.1832 | 397.3300 | TRUE | FALSE | FALSE | 29 | SELL_ALL | 29 |
 
 ## t+1 Hypothetical Trigger Close Threshold (P_min)
 | Ticker | MA Rule | SUM_{n-1} | Close(t-5) | SMA-Equivalent Threshold (strict >) | P_min (strict >) | Display |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| GOOG | SMA50 | $15,545.68 | 309.4100 | 317.2588 | 317.2588 | 317.26+ |
-| NVDA | SMA50 | $9,035.76 | 181.9300 | 184.4033 | 184.4033 | 184.40+ |
-| SMH | SMA100 | $37,525.42 | 396.8800 | 379.0446 | 396.8800 | 396.88+ |
+| GOOG | SMA50 | $15,627.97 | 308.4200 | 318.9382 | 318.9382 | 318.94+ |
+| NVDA | SMA50 | $9,074.71 | 186.0300 | 185.1982 | 186.0300 | 186.03+ |
+| SMH | SMA100 | $37,379.72 | 401.0300 | 377.5729 | 401.0300 | 401.03+ |
 
 ## Trade Details
 ### Trade Date (ET): 2026-03-20

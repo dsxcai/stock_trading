@@ -380,14 +380,14 @@ def _effective_meta(states: Dict[str, Any], mode: Any) -> Dict[str, Any]:
     eff = dict(states.get('meta', {}) or {})
     transient = _transient_report_meta(states, mode)
     if transient:
-        for k in ('signal_basis', 'execution_basis', 'version_anchor_et', 'version'):
+        for k in ('signal_basis', 'execution_basis', 'version_anchor_et', 'version', 'price_notes'):
             if k in transient:
                 eff[k] = transient.get(k)
         eff['mode'] = transient.get('mode') or str(mode or '').strip()
         return eff
     snap = _get_mode_snapshot(states, mode)
     if snap:
-        for k in ('signal_basis', 'execution_basis', 'version_anchor_et', 'version'):
+        for k in ('signal_basis', 'execution_basis', 'version_anchor_et', 'version', 'price_notes'):
             if k in snap:
                 eff[k] = snap.get(k)
         eff['mode'] = snap.get('mode') or str(mode or '').strip()
@@ -438,6 +438,10 @@ def render_report(states: Dict[str, Any], schema: Dict[str, Any], mode: str) -> 
         lines.append(f"- Signal Basis: t={sb.get('t_et')} ({sb.get('basis', '')})")
     if eb:
         lines.append(f"- Execution Basis: t+1={eb.get('t_plus_1_et')} ({eb.get('basis', '')})")
+    for note in meta.get('price_notes') or []:
+        note_text = str(note or '').strip()
+        if note_text:
+            lines.append(f'- {note_text}')
     lines.append('')
     for t in schema.get('tables') or []:
         title = t.get('title') or ''

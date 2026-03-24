@@ -293,6 +293,7 @@ The report will then derive the corresponding runtime context directly rather th
 ```
 
 Purpose: update the state before market open and generate the premarket report.
+Current-position USD prices and signal inputs stay on the prior NYSE close. `Unrealized PnL (TWD)` still uses the latest available USD/TWD CSV quote and the report marks that as `Estimated Price`.
 
 ### 6.2 Intraday
 
@@ -301,6 +302,7 @@ Purpose: update the state before market open and generate the premarket report.
 ```
 
 Purpose: update the state during market hours and generate the intraday report.
+If a same-day CSV row is available, `Current Positions` and `Signal Status` use that same-day price in Intraday mode, and the report marks it as `Estimated Price`.
 
 ### 6.3 AfterClose
 
@@ -558,7 +560,7 @@ Imported trade rounding is controlled by `config.json` under `state_engine.numer
 
 After imported trades are merged, `portfolio.positions` is rebuilt from the full trade ledger. Remaining position cost basis follows FIFO. This trade-ledger rebuild applies to holdings only; `market.prices_now` is rebuilt separately from loaded CSV history.
 Current-position notes shown in reports are derived from the surviving FIFO lots behind each holding, aggregating the unique non-empty trade notes that still compose the remaining shares and appending the remaining share count for each note, such as `AA x2 | BB x7`. They are not persisted in `portfolio.positions`.
-The `Current Positions` table also includes `Unrealized PnL (TWD)` and `Unrealized PnL % (TWD)`. They are computed only at report-build time by converting each surviving FIFO buy lot with the USD/TWD close on or before its buy date, then comparing that TWD cost basis with the current position market value translated by the latest USD/TWD close.
+The `Current Positions` table also includes `Unrealized PnL (TWD)` and `Unrealized PnL % (TWD)`. They are computed only at report-build time by converting each surviving FIFO buy lot with the USD/TWD close on or before its buy date, then comparing that TWD cost basis with the current position market value translated by the latest available USD/TWD CSV quote. In Premarket mode the report marks that FX translation as `Estimated Price` whenever the FX quote is newer than the prior-close signal basis day.
 
 ### 10.6 When `--mode` is mandatory
 

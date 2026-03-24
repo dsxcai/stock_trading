@@ -46,6 +46,7 @@ class ReportingSafetyTests(unittest.TestCase):
                 "signal_basis": {"t_et": "2026-03-17", "basis": "NYSE Close"},
                 "execution_basis": {"t_plus_1_et": "2026-03-18", "basis": "NYSE Trading Day"},
                 "version_anchor_et": "2026-03-18",
+                "price_notes": ["Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24."],
             },
         }
         markdown = reporting.render_report(states, {"tables": []}, "Premarket")
@@ -53,6 +54,7 @@ class ReportingSafetyTests(unittest.TestCase):
         self.assertIn("# Daily Investment Report (Premarket)", markdown)
         self.assertIn("- Signal Basis: t=2026-03-17 (NYSE Close)", markdown)
         self.assertIn("- Execution Basis: t+1=2026-03-18 (NYSE Trading Day)", markdown)
+        self.assertIn("- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24.", markdown)
 
     def test_strip_persisted_report_transients_removes_by_mode(self) -> None:
         states = {

@@ -52,6 +52,8 @@ def compute_tactical_plan(
     }
     market = states.get("market", {}) or {}
     history = runtime_support._market_history_rows_map(runtime)
+    signal_day_et = runtime_support._runtime_signal_basis_day(runtime)
+    fx_tickers = runtime_support._fx_tickers_from_config(runtime)
     signals_inputs = dict(market.get("signals_inputs") or {})
     threshold_inputs = dict(market.get("next_close_threshold_inputs") or {})
     trades = trades if isinstance(trades, list) else []
@@ -60,6 +62,8 @@ def compute_tactical_plan(
         ma_rule = _normalize_ma_rule(ind_spec)
         window = _parse_indicator_window(ma_rule) or 0
         rows = (history.get(ticker) or {}).get("rows") or []
+        if signal_day_et and ticker not in fx_tickers:
+            rows = runtime_support._history_rows_on_or_before(rows, signal_day_et)
         if derive_signals_inputs != "never":
             if derive_signals_inputs == "force" or (
                 derive_signals_inputs == "missing" and ticker not in signals_inputs

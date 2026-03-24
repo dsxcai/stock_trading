@@ -200,6 +200,7 @@ class RegressionPipelineTests(unittest.TestCase):
             self.assertIn("Imported from Capital XLS (SMH VanEck半導體ETF) x29", current_positions)
             self.assertIn("Unrealized PnL (TWD)", current_positions)
             self.assertIn("Unrealized PnL % (TWD)", current_positions)
+            self.assertIn("Estimated Price", (workdir / "out_report.md").read_text(encoding="utf-8"))
 
     def test_premarket_pipeline_rebuilds_market_snapshot_to_functional_held_and_fx_tickers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

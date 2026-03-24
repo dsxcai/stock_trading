@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from core.models import TacticalPlan
@@ -102,6 +103,100 @@ def _usd_twd_fx_ticker(config: Optional[Dict[str, Any]]) -> str:
     if not isinstance(usd_twd_cfg, dict):
         return ""
     return str(usd_twd_cfg.get("ticker") or "").upper().strip()
+
+
+def _normalize_mode_key(mode: Any) -> str:
+    return re.sub(r"[\s_\-]+", "", str(mode or "").strip().lower())
+
+
+def _signal_basis_day(report_meta: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(report_meta, dict):
+        return ""
+    signal_basis = report_meta.get("signal_basis") or {}
+    return str(signal_basis.get("t_et") or "").strip()
+
+
+def _latest_row_date(rows: List[Dict[str, Any]]) -> str:
+    for row in reversed(rows):
+        row_date = str((row or {}).get("Date") or "").strip()
+        if row_date:
+            return row_date
+    return ""
+
+
+def _report_active_tickers(states: Dict[str, Any], config: Optional[Dict[str, Any]]) -> List[str]:
+    tickers: List[str] = []
+    seen: set[str] = set()
+    positions = ((states.get("portfolio") or {}).get("positions")) or []
+    for position in positions:
+        if not isinstance(position, dict):
+            continue
+        ticker = str(position.get("ticker") or "").upper().strip()
+        try:
+            shares = float(position.get("shares") or 0.0)
+        except Exception:
+            shares = 0.0
+        if ticker and shares > 0 and ticker not in seen:
+            seen.add(ticker)
+            tickers.append(ticker)
+    tactical_indicators = {}
+    if isinstance(config, dict):
+        tactical_indicators = dict(config.get("tactical_indicators") or {})
+    for ticker in tactical_indicators:
+        ticker_norm = str(ticker or "").upper().strip()
+        if ticker_norm and ticker_norm not in seen:
+            seen.add(ticker_norm)
+            tickers.append(ticker_norm)
+    return tickers
+
+
+def _estimated_price_notes(
+    states: Dict[str, Any],
+    config: Optional[Dict[str, Any]],
+    report_meta: Optional[Dict[str, Any]],
+    market_history: Optional[Dict[str, Any]],
+) -> List[str]:
+    notes: List[str] = []
+    if not isinstance(report_meta, dict) or not isinstance(market_history, dict):
+        return notes
+    mode_key = _normalize_mode_key(report_meta.get("mode_key") or report_meta.get("mode"))
+    signal_day = _signal_basis_day(report_meta)
+    fx_ticker = _usd_twd_fx_ticker(config)
+    if mode_key == "intraday" and signal_day:
+        same_day_tickers: List[str] = []
+        for ticker in _report_active_tickers(states, config):
+            if ticker == fx_ticker:
+                continue
+            rows = list(((market_history.get(ticker) or {}).get("rows")) or [])
+            if _latest_row_date(rows) == signal_day:
+                same_day_tickers.append(ticker)
+        if same_day_tickers:
+            notes.append(
+                "Estimated Price: Intraday current positions and signal trigger use same-day CSV prices "
+                f"when available ({', '.join(same_day_tickers)})."
+            )
+    if mode_key == "premarket" and signal_day and fx_ticker:
+        fx_rows = list(((market_history.get(fx_ticker) or {}).get("rows")) or [])
+        latest_fx_date = _latest_row_date(fx_rows)
+        if latest_fx_date and latest_fx_date > signal_day:
+            positions = ((states.get("portfolio") or {}).get("positions")) or []
+            has_open_position = False
+            for position in positions:
+                if not isinstance(position, dict):
+                    continue
+                try:
+                    shares = float(position.get("shares") or 0.0)
+                except Exception:
+                    shares = 0.0
+                if shares > 0:
+                    has_open_position = True
+                    break
+            if has_open_position:
+                notes.append(
+                    "Estimated Price: Premarket Unrealized PnL (TWD) uses the latest "
+                    f"{fx_ticker} CSV quote from {latest_fx_date}."
+                )
+    return notes
 
 
 def _latest_close(rows: List[Dict[str, Any]]) -> Optional[float]:
@@ -299,7 +394,14 @@ def build_report_root(
                     bucket_totals["unrealized_pnl_twd_pct"] = (unrealized_pnl_twd / holdings_cost_twd) if holdings_cost_twd > 0 else None
         root["portfolio"] = portfolio
     if isinstance(report_meta, dict):
-        root["_report_meta"] = dict(report_meta)
+        meta = dict(report_meta)
+        price_notes = [str(item).strip() for item in (meta.get("price_notes") or []) if str(item).strip()]
+        for note in _estimated_price_notes(root, config, meta, market_history):
+            if note not in price_notes:
+                price_notes.append(note)
+        if price_notes:
+            meta["price_notes"] = price_notes
+        root["_report_meta"] = meta
     return root
 
 
