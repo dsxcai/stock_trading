@@ -267,6 +267,7 @@ Likewise, `signals`, `thresholds`, `market.signals_inputs`, and `market.next_clo
 `states.json` now primarily retains:
 
 - market snapshot: `market.prices_now`, `market.asof_t_et`
+  `market.prices_now` is rebuilt from loaded CSV history for the tickers that are functionally required by `state_engine` config plus any currently held positions; stale symbols are not retained. This is a market-data rebuild performed during the core update flow, not a rebuild from imported trade HTML/XLS records.
 - portfolio snapshot: `portfolio.positions`, `portfolio.cash`, `portfolio.totals`, `portfolio.performance`
 
 ### 5.3 Why all reports now require an explicit `--mode`
@@ -553,7 +554,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 
 Imported trade rounding is controlled by `config.json` under `state_engine.numeric_precision`. In practice, `trade_cash_amount` controls stored `cash_amount` values and `trade_dedupe_amount` controls the numeric precision used by trade deduplication keys.
 
-After imported trades are merged, `portfolio.positions` is rebuilt from the full trade ledger. Remaining position cost basis follows FIFO.
+After imported trades are merged, `portfolio.positions` is rebuilt from the full trade ledger. Remaining position cost basis follows FIFO. This trade-ledger rebuild applies to holdings only; `market.prices_now` is rebuilt separately from loaded CSV history.
 Current-position notes shown in reports are derived from the surviving FIFO lots behind each holding, aggregating the unique non-empty trade notes that still compose the remaining shares and appending the remaining share count for each note, such as `AA x2 | BB x7`. They are not persisted in `portfolio.positions`.
 
 ### 10.6 When `--mode` is mandatory

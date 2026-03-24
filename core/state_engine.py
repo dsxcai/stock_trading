@@ -721,6 +721,46 @@ def _discover_tickers_from_config(states: Dict[str, Any], runtime: Dict[str, Any
     tickers = [t for t in tickers if t and (not (t.upper() in seen or seen.add(t.upper())))]
     return [t.upper() for t in tickers]
 
+def _rebuild_market_snapshot_from_history(states: Dict[str, Any], runtime: Dict[str, Any], tickers: Optional[List[str]]=None) -> None:
+    market = states.setdefault('market', {})
+    history = _runtime_history(runtime)
+    keep_tickers = tickers if isinstance(tickers, list) and tickers else _discover_tickers_from_config(states, runtime)
+    new_prices_now: Dict[str, float] = {}
+    imported_dates: List[str] = []
+    for ticker in keep_tickers:
+        ticker_norm = str(ticker or '').upper().strip()
+        if not ticker_norm:
+            continue
+        rows = ((history.get(ticker_norm) or {}).get('rows') or [])
+        if not rows:
+            continue
+        last_row = rows[-1] if isinstance(rows[-1], dict) else {}
+        last_close = last_row.get('Close')
+        try:
+            if last_close is None:
+                continue
+            new_prices_now[ticker_norm] = float(last_close)
+        except Exception:
+            continue
+        last_date = str(last_row.get('Date') or '').strip()
+        if last_date:
+            imported_dates.append(last_date)
+    old_prices_now = market.get('prices_now') or {}
+    removed = []
+    if isinstance(old_prices_now, dict):
+        removed = sorted([
+            str(ticker)
+            for ticker in old_prices_now.keys()
+            if str(ticker or '').upper().strip() not in set(new_prices_now.keys())
+        ])
+    market['prices_now'] = new_prices_now
+    if imported_dates:
+        market['asof_t_et'] = max(imported_dates)
+    else:
+        market.pop('asof_t_et', None)
+    if removed:
+        print(f"[MARKET] rebuilt market snapshot and removed {len(removed)} stale ticker(s): {', '.join(removed)}")
+
 def _compute_keep_history_rows(states: Dict[str, Any], runtime: Dict[str, Any]) -> int:
     market = states.get('market', {}) or {}
     thr_inp = market.get('next_close_threshold_inputs', {}) or {}
@@ -1416,6 +1456,7 @@ def _run_main(args: argparse.Namespace) -> int:
     if late_results:
         results.extend(late_results)
         processed_tickers.extend([r.ticker for r in late_results])
+    _rebuild_market_snapshot_from_history(states, runtime)
     _reprice_and_totals(states, runtime)
     broker_investment_total_usd = args.broker_investment_total_usd
     broker_investment_total_supplied = broker_investment_total_usd is not None

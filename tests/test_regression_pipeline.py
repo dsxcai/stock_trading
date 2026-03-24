@@ -199,6 +199,44 @@ class RegressionPipelineTests(unittest.TestCase):
             self.assertIn("Imported from Capital XLS (SPY SPDR標普500ETF) x17", current_positions)
             self.assertIn("Imported from Capital XLS (SMH VanEck半導體ETF) x29", current_positions)
 
+    def test_premarket_pipeline_prunes_market_snapshot_to_functional_and_held_tickers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            _copy_project(workdir)
+            subprocess.run(
+                [
+                    sys.executable,
+                    "update_states.py",
+                    "--states",
+                    "states.json",
+                    "--out",
+                    "out_states.json",
+                    "--csv-dir",
+                    "data",
+                    "--derive-signals-inputs",
+                    "force",
+                    "--derive-threshold-inputs",
+                    "force",
+                    "--mode",
+                    "Premarket",
+                    "--render-report",
+                    "--report-schema",
+                    "report_spec.json",
+                    "--report-out",
+                    "out_report.md",
+                    "--now-et",
+                    FIXED_NOW_ET,
+                ],
+                cwd=workdir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+
+            out_states = json.loads((workdir / "out_states.json").read_text(encoding="utf-8"))
+            prices_now = ((out_states.get("market") or {}).get("prices_now") or {})
+            self.assertEqual(set(prices_now), {"ARKQ", "GOOG", "META", "NVDA", "SMH", "SPY"})
+
 
 if __name__ == "__main__":
     unittest.main()
