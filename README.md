@@ -554,6 +554,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 Imported trade rounding is controlled by `config.json` under `state_engine.numeric_precision`. In practice, `trade_cash_amount` controls stored `cash_amount` values and `trade_dedupe_amount` controls the numeric precision used by trade deduplication keys.
 
 After imported trades are merged, `portfolio.positions` is rebuilt from the full trade ledger. Remaining position cost basis follows FIFO.
+Current-position notes shown in reports are derived from the surviving FIFO lots behind each holding, aggregating the unique non-empty trade notes that still compose the remaining shares and appending the remaining share count for each note, such as `AA x2 | BB x7`. They are not persisted in `portfolio.positions`.
 
 ### 10.6 When `--mode` is mandatory
 

@@ -150,6 +150,55 @@ class RegressionPipelineTests(unittest.TestCase):
             expected_report = (FIXTURES_DIR / "golden_premarket_report.md").read_text(encoding="utf-8")
             self.assertEqual(actual_report, expected_report)
 
+    def test_premarket_pipeline_keeps_position_notes_out_of_states(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            _copy_project(workdir)
+            subprocess.run(
+                [
+                    sys.executable,
+                    "update_states.py",
+                    "--states",
+                    "states.json",
+                    "--out",
+                    "out_states.json",
+                    "--csv-dir",
+                    "data",
+                    "--derive-signals-inputs",
+                    "force",
+                    "--derive-threshold-inputs",
+                    "force",
+                    "--mode",
+                    "Premarket",
+                    "--render-report",
+                    "--report-schema",
+                    "report_spec.json",
+                    "--report-out",
+                    "out_report.md",
+                    "--now-et",
+                    FIXED_NOW_ET,
+                ],
+                cwd=workdir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+
+            out_states = json.loads((workdir / "out_states.json").read_text(encoding="utf-8"))
+            for position in (out_states.get("portfolio") or {}).get("positions") or []:
+                self.assertNotIn("notes", position)
+
+            current_positions = (workdir / "out_report.md").read_text(encoding="utf-8").split(
+                "## Current Positions\n",
+                1,
+            )[1].split(
+                "\n## Signal Status",
+                1,
+            )[0]
+            self.assertIn("Imported from Capital XLS (ARKQ ARKQUS) x70", current_positions)
+            self.assertIn("Imported from Capital XLS (SPY SPDR標普500ETF) x17", current_positions)
+            self.assertIn("Imported from Capital XLS (SMH VanEck半導體ETF) x29", current_positions)
+
 
 if __name__ == "__main__":
     unittest.main()

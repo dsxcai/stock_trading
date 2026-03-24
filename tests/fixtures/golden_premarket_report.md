@@ -6,38 +6,38 @@
 | Item | Value |
 | --- | ---: |
 | Initial Investment | $40,490.18 |
-| Current Holdings Market Value | $30,209.35 |
+| Current Holdings Market Value | $30,707.50 |
 | Cash Position | $73.35 |
-| Current Total Assets | $30,282.70 |
+| Current Total Assets | $30,780.85 |
 | Net External Cash Flow | $-7,725.46 |
 | Effective Capital Base | $32,764.72 |
-| Cumulative Profit | $-2,482.02 |
-| Cumulative Return | -7.58% |
+| Cumulative Profit | $-1,983.87 |
+| Cumulative Return | -6.05% |
 
 ## Current Positions
 | Bucket | Ticker | Shares | Cost (USD) | Price (Now) | Market Value (USD) | Unrealized PnL (USD) | Unrealized PnL % | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Core | ARKQ | 70 | $8,698.20 | 114.6600 | $8,026.20 | $-672.00 | -7.73% | Added 37 shares intraday on 03/02 |
-| Core | SPY | 17 | $11,618.54 | 648.5700 | $11,025.69 | $-592.85 | -5.10% | Added 6 shares intraday on 03/02 |
-| Tactical | SMH | 29 | $11,494.64 | 384.7400 | $11,157.46 | $-337.18 | -2.93% |  |
-| Core Subtotal | - | - | $20,316.74 | - | $19,051.89 | $-1,264.85 | -6.23% | - |
-| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,157.46 | $-337.18 | -2.93% | - |
+| Core | ARKQ | 70 | $8,698.20 | 117.3800 | $8,216.60 | $-481.60 | -5.54% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
+| Core | SPY | 17 | $11,618.54 | 655.3800 | $11,141.46 | $-477.08 | -4.11% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
+| Tactical | SMH | 29 | $11,494.64 | 391.3600 | $11,349.44 | $-145.20 | -1.26% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
+| Core Subtotal | - | - | $20,316.74 | - | $19,358.06 | $-958.68 | -4.72% | - |
+| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,349.44 | $-145.20 | -1.26% | - |
 | Cash Pool | - | - | - | - | $73.35 | - | - | - |
-| Portfolio Total | - | - | $31,811.38 | - | $30,282.70 | $-1,602.03 | -5.04% | - |
+| Portfolio Total | - | - | $31,811.38 | - | $30,780.85 | $-1,103.88 | -3.47% | - |
 
 ## Signal Status
 | Ticker | A: Close(t) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |
 | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: |
-| GOOG | 298.7900 | SMA50 | 318.0362 | 301.4600 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
-| NVDA | 172.9300 | SMA50 | 184.6050 | 180.2500 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
-| SMH | 384.7400 | SMA100 | 378.5711 | 387.3300 | TRUE | FALSE | FALSE | 29 | SELL_ALL | 29 |
+| GOOG | 299.0200 | SMA50 | 317.4964 | 304.4200 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
+| NVDA | 175.6400 | SMA50 | 184.4124 | 183.2200 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
+| SMH | 391.3600 | SMA100 | 378.8853 | 393.9200 | TRUE | FALSE | FALSE | 29 | SELL_ALL | 29 |
 
 ## t+1 Hypothetical Trigger Close Threshold (P_min)
 | Ticker | MA Rule | SUM_{n-1} | Close(t-5) | SMA-Equivalent Threshold (strict >) | P_min (strict >) | Display |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| GOOG | SMA50 | $15,575.80 | 304.4200 | 317.8735 | 317.8735 | 317.87+ |
-| NVDA | SMA50 | $9,045.21 | 183.2200 | 184.5961 | 184.5961 | 184.60+ |
-| SMH | SMA100 | $37,497.17 | 393.9200 | 378.7593 | 393.9200 | 393.92+ |
+| GOOG | SMA50 | $15,545.68 | 309.4100 | 317.2588 | 317.2588 | 317.26+ |
+| NVDA | SMA50 | $9,035.76 | 181.9300 | 184.4033 | 184.4033 | 184.40+ |
+| SMH | SMA100 | $37,525.42 | 396.8800 | 379.0446 | 396.8800 | 396.88+ |
 
 ## Trade Details
 ### Trade Date (ET): 2026-03-20

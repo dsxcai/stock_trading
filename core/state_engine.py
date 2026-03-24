@@ -476,6 +476,13 @@ def _strip_persisted_report_transients(states: Dict[str, Any]) -> None:
     if isinstance(market, dict):
         market.pop('signals_inputs', None)
         market.pop('next_close_threshold_inputs', None)
+    portfolio = states.get('portfolio')
+    if isinstance(portfolio, dict):
+        positions = portfolio.get('positions')
+        if isinstance(positions, list):
+            for pos in positions:
+                if isinstance(pos, dict):
+                    pos.pop('notes', None)
     states.pop('signals', None)
     states.pop('thresholds', None)
     meta = states.get('meta')
@@ -1033,7 +1040,7 @@ def _get_or_create_position(states: Dict[str, Any], runtime: Dict[str, Any], tic
             if not str(p.get('bucket') or '').strip():
                 p['bucket'] = _position_bucket_default(states, runtime, ticker)
             return p
-    p = {'ticker': ticker, 'bucket': _position_bucket_default(states, runtime, ticker), 'shares': 0, 'cost_usd': 0.0, 'notes': ''}
+    p = {'ticker': ticker, 'bucket': _position_bucket_default(states, runtime, ticker), 'shares': 0, 'cost_usd': 0.0}
     positions.append(p)
     return p
 
@@ -1130,8 +1137,6 @@ def _set_position_from_fifo_lots(pos: Dict[str, Any], lots: List[Dict[str, float
     cost_now = round_with_precision(_fifo_lots_total_cost(lots), usd_amount_ndigits) if shares_now > 0 else 0.0
     pos['shares'] = shares_now
     pos['cost_usd'] = cost_now
-    if shares_now <= 0:
-        pos['notes'] = ''
 
 def _apply_incremental_trades_to_portfolio_fifo(states: Dict[str, Any], runtime: Dict[str, Any], trades_delta: List[Dict[str, Any]]) -> None:
     if not trades_delta:
