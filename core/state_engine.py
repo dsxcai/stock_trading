@@ -1431,6 +1431,7 @@ def _run_main(args: argparse.Namespace) -> int:
         now_et = datetime.now(ZoneInfo(_ET_TZ))
     resolved_ctx = None
     report_meta: Optional[Dict[str, Any]] = None
+    force_mode = bool(getattr(args, 'force_mode', False))
     if mode_label:
         if str(args.broker_asof_et or '').strip() or str(args.broker_asof_et_time or '').strip() or str(args.broker_asof_et_datetime or '').strip():
             print('[WARN] --broker-asof-et / --broker-asof-et-time / --broker-asof-et-datetime are ignored when --mode is used; update_states resolves t / t+1 automatically.')
@@ -1438,9 +1439,13 @@ def _run_main(args: argparse.Namespace) -> int:
         print(f'[INFO] mode={resolved_ctx.mode_label} | session={resolved_ctx.session_class} | now_et={resolved_ctx.now_et_iso} | t={resolved_ctx.t_et} | t+1={resolved_ctx.t_plus_1_et} | report_date={resolved_ctx.report_date}')
         print(f'[INFO] {resolved_ctx.rationale}')
         if not resolved_ctx.reasonable:
-            print(f'[ABORT] {resolved_ctx.warning}')
-            print('[ABORT] No state update and no report file were generated.')
-            raise SystemExit(2)
+            if force_mode:
+                print(f'[WARN] forcing mode={resolved_ctx.mode_label} via -f/--force-mode despite ET/session mismatch: {resolved_ctx.warning}')
+            else:
+                print(f'[ABORT] {resolved_ctx.warning}')
+                print(f'[ABORT] Re-run with -f / --force-mode to bypass the ET/session check for mode={resolved_ctx.mode_label}.')
+                print('[ABORT] No state update and no report file were generated.')
+                raise SystemExit(2)
         report_meta = _report_meta_from_context(resolved_ctx)
         runtime['report_meta'] = dict(report_meta)
     else:

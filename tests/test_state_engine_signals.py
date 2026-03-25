@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import tempfile
 import unittest
 from datetime import datetime
@@ -7,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from core import state_engine
+from core.models import ReportContext
 from core.tactical_engine import compute_tactical_plan
 
 
@@ -482,6 +484,129 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
 
         self.assertEqual(refreshed, [])
         mocked_download.assert_not_called()
+
+
+class StateEngineModeGateTests(unittest.TestCase):
+    @staticmethod
+    def _mode_args(*, force_mode: bool) -> argparse.Namespace:
+        return argparse.Namespace(
+            states="states.json",
+            config="config.json",
+            trades_file="trades.json",
+            csv_dir="data",
+            allow_incomplete_csv_rows=False,
+            tickers="",
+            out="out_states.json",
+            keep_history_rows=0,
+            derive_signals_inputs="missing",
+            derive_threshold_inputs="missing",
+            prices_now_from="close",
+            mode="Intraday",
+            now_et="2026-03-18T08:00:00-04:00",
+            force_mode=force_mode,
+            render_report=False,
+            report_schema="report_spec.json",
+            report_dir="report",
+            report_out="",
+            log_file="",
+            broker_investment_total_usd=None,
+            broker_investment_total_kind="cost_basis",
+            tactical_cash_usd=None,
+            initial_investment_usd=None,
+            cash_adjust_usd=None,
+            cash_adjust_note="",
+            cash_transfer_to_reserve_usd=None,
+            broker_asof_et="",
+            broker_asof_et_time="",
+            broker_asof_et_datetime="",
+            imported_trades_json=[],
+            trades_import_mode="append",
+            verify_tolerance_usd=1.0,
+        )
+
+    @staticmethod
+    def _unreasonable_intraday_context() -> ReportContext:
+        return ReportContext(
+            mode_label="Intraday",
+            mode_key="intraday",
+            session_class="premarket",
+            now_et_iso="2026-03-18T08:00:00-04:00",
+            t_et="2026-03-18",
+            t_plus_1_et="2026-03-19",
+            report_date="2026-03-18",
+            broker_asof_et="2026-03-18",
+            broker_asof_et_datetime="2026-03-18T08:00:00-04:00",
+            snapshot_kind="intraday",
+            reasonable=False,
+            rationale="intraday requires an active regular session.",
+            warning="current ET session is premarket; the regular session has not started yet.",
+        )
+
+    def test_run_main_mode_abort_mentions_force_mode_bypass(self) -> None:
+        messages: list[str] = []
+        had_print = hasattr(state_engine, "print")
+        original_print = getattr(state_engine, "print", None)
+        state_engine.print = lambda *parts, **kwargs: messages.append(" ".join(str(part) for part in parts))
+        try:
+            with mock.patch.object(state_engine, "_load_json", return_value={}), mock.patch.object(
+                state_engine,
+                "_load_runtime_config",
+                return_value={"numeric_precision": _numeric_precision()},
+            ), mock.patch.object(state_engine, "_load_trades_payload", return_value=[]), mock.patch.object(
+                state_engine, "_migrate_state_schema"
+            ), mock.patch.object(state_engine, "_ensure_trading_calendar"), mock.patch.object(
+                state_engine, "_ensure_cash_buckets"
+            ), mock.patch.object(
+                state_engine,
+                "_resolve_report_context",
+                return_value=self._unreasonable_intraday_context(),
+            ):
+                with self.assertRaises(SystemExit) as exc:
+                    state_engine._run_main(self._mode_args(force_mode=False))
+        finally:
+            if had_print:
+                state_engine.print = original_print
+            else:
+                delattr(state_engine, "print")
+
+        self.assertEqual(exc.exception.code, 2)
+        joined = "\n".join(messages)
+        self.assertIn("current ET session is premarket", joined)
+        self.assertIn("-f / --force-mode", joined)
+
+    def test_run_main_force_mode_bypasses_session_gate(self) -> None:
+        messages: list[str] = []
+        had_print = hasattr(state_engine, "print")
+        original_print = getattr(state_engine, "print", None)
+        state_engine.print = lambda *parts, **kwargs: messages.append(" ".join(str(part) for part in parts))
+        try:
+            with mock.patch.object(state_engine, "_load_json", return_value={}), mock.patch.object(
+                state_engine,
+                "_load_runtime_config",
+                return_value={"numeric_precision": _numeric_precision()},
+            ), mock.patch.object(state_engine, "_load_trades_payload", return_value=[]), mock.patch.object(
+                state_engine, "_migrate_state_schema"
+            ), mock.patch.object(state_engine, "_ensure_trading_calendar"), mock.patch.object(
+                state_engine, "_ensure_cash_buckets"
+            ), mock.patch.object(
+                state_engine,
+                "_resolve_report_context",
+                return_value=self._unreasonable_intraday_context(),
+            ), mock.patch.object(state_engine, "_discover_tickers_from_config", return_value=[]), mock.patch.object(
+                state_engine,
+                "_refresh_csv_history_for_mode_updates",
+                side_effect=RuntimeError("refresh reached"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "refresh reached"):
+                    state_engine._run_main(self._mode_args(force_mode=True))
+        finally:
+            if had_print:
+                state_engine.print = original_print
+            else:
+                delattr(state_engine, "print")
+
+        joined = "\n".join(messages)
+        self.assertIn("forcing mode=Intraday via -f/--force-mode", joined)
 
 
 if __name__ == "__main__":

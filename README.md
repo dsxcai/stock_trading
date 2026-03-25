@@ -530,6 +530,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | `--mode`          | Specify `Premarket`, `Intraday`, or `AfterClose`             |
 | `--render-report` | Generate the report in the same execution flow after update  |
 | `--now-et`        | Override the current ET timestamp for testing mode or session determination |
+| `-f`, `--force-mode`   | Bypass the ET/session check and run the requested `--mode` anyway |
 
 ### 10.3 Cash and performance
 
@@ -574,6 +575,8 @@ The `Current Positions` table also includes `Unrealized PnL (TWD)` and `Unrealiz
 When `--mode` is omitted, the system performs only state updates such as imported trades, cash adjustments, or initial investment updates.
 
 It does not recompute report-scoped signals or thresholds, and it does not generate a report.
+
+If `--mode` is present but the current ET session does not normally allow that mode, the command aborts by default. Use `-f` / `--force-mode` only when you intentionally want to run that mode anyway for backfill, testing, or manual scenario generation.
 
 ------
 

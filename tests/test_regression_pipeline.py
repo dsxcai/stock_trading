@@ -240,6 +240,62 @@ class RegressionPipelineTests(unittest.TestCase):
             prices_now = ((out_states.get("market") or {}).get("prices_now") or {})
             self.assertEqual(set(prices_now), {"ARKQ", "GOOG", "META", "NVDA", "SMH", "SPY", "TWD=X"})
 
+    def test_force_mode_allows_session_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            _copy_project(workdir)
+            base_cmd = [
+                sys.executable,
+                "update_states.py",
+                "--states",
+                "states.json",
+                "--out",
+                "forced_intraday_states.json",
+                "--csv-dir",
+                "data",
+                "--derive-signals-inputs",
+                "force",
+                "--derive-threshold-inputs",
+                "force",
+                "--mode",
+                "Intraday",
+                "--render-report",
+                "--report-schema",
+                "report_spec.json",
+                "--report-out",
+                "forced_intraday_report.md",
+                "--now-et",
+                FIXED_NOW_ET,
+            ]
+            rejected = subprocess.run(
+                base_cmd,
+                cwd=workdir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("current ET session is premarket", rejected.stdout)
+            self.assertFalse((workdir / "forced_intraday_states.json").exists())
+
+            forced = subprocess.run(
+                [*base_cmd, "--force-mode"],
+                cwd=workdir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(forced.returncode, 0, forced.stdout)
+            self.assertIn("forcing mode=Intraday despite ET/session mismatch", forced.stdout)
+            self.assertTrue((workdir / "forced_intraday_states.json").exists())
+            self.assertTrue((workdir / "forced_intraday_report.md").exists())
+            self.assertIn(
+                "# Daily Investment Report (Intraday)",
+                (workdir / "forced_intraday_report.md").read_text(encoding="utf-8"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

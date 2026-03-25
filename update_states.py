@@ -22,6 +22,7 @@ def main() -> None:
     parser.add_argument("--refresh-csv", choices=["auto", "always", "never"], default="auto", help="Whether to refresh active CSV market data before importing prices. 'auto' refreshes only when --mode is supplied.")
     parser.add_argument("--mode", default="", help="Mode for report-scoped updates, such as Premarket, Intraday, or AfterClose")
     parser.add_argument("--now-et", default="", help="Override current ET datetime for report-context resolution")
+    parser.add_argument("-f", "--force-mode", action="store_true", help="Bypass the ET/session check and run the requested --mode anyway")
     parser.add_argument("--render-report", action="store_true", help="Render the markdown report after state updates complete")
     parser.add_argument("--report-schema", default="report_spec.json", help="Schema path used when --render-report is enabled")
     parser.add_argument("--report-dir", default="report", help="Output directory for generated reports")
