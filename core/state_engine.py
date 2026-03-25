@@ -826,15 +826,9 @@ def _refresh_csv_history_for_mode_updates(
     tickers: List[str],
     now_et: datetime,
     mode_label: str,
-    refresh_policy: str='auto',
+    allow_incomplete_rows: bool = False,
 ) -> List[str]:
-    policy = str(refresh_policy or 'auto').strip().lower()
-    if policy not in {'auto', 'always', 'never'}:
-        raise ValueError(f'unsupported refresh policy: {refresh_policy}')
-    if policy == 'never':
-        print('[AUTOCSV] skipped: refresh policy is never.')
-        return []
-    if policy == 'auto' and not str(mode_label or '').strip():
+    if not str(mode_label or '').strip():
         print('[AUTOCSV] skipped: no --mode supplied.')
         return []
     target_end_et = _latest_completed_market_day_et(runtime, now_et)
@@ -848,32 +842,26 @@ def _refresh_csv_history_for_mode_updates(
             continue
         active_tickers.append(ticker_norm)
         seen.add(ticker_norm)
-    stale_specs: List[Tuple[str, Path, date, Optional[date], Optional[date]]] = []
+    refresh_specs: List[Tuple[str, Path, date, Optional[date], Optional[date]]] = []
     for ticker in active_tickers:
         candidates = _resolve_csv_candidates(runtime, csv_dir, ticker)
         existing_path = next((candidate for candidate in candidates if os.path.exists(candidate)), '')
         chosen_path = existing_path or (candidates[0] if candidates else os.path.join(csv_dir, f'{ticker}.csv'))
         first_date, last_date = _csv_date_bounds(chosen_path)
-        if last_date is not None and last_date >= target_end:
-            continue
         start_date = first_date or default_start
-        stale_specs.append((ticker, Path(chosen_path), start_date, first_date, last_date))
-    if not stale_specs:
-        print(f'[AUTOCSV] skipped: {len(active_tickers)} active ticker(s) already cover target end date {target_end_et}.')
+        refresh_specs.append((ticker, Path(chosen_path), start_date, first_date, last_date))
+    if not refresh_specs:
+        print('[AUTOCSV] skipped: no active tickers resolved for refresh.')
         return []
     from download_1y import download_history, yf
     if yf is None:
         msg = '[AUTOCSV] yfinance is not installed; automatic CSV refresh skipped.'
-        if policy == 'always':
-            print(f'[ABORT] {msg}')
-            raise SystemExit(2)
         print(f'[WARN] {msg}')
         return []
     refreshed: List[str] = []
-    failures: List[str] = []
     csv_root = Path(csv_dir)
     csv_root.mkdir(parents=True, exist_ok=True)
-    for ticker, output_path, start_date, first_date, last_date in stale_specs:
+    for ticker, output_path, start_date, first_date, last_date in refresh_specs:
         before = last_date.isoformat() if last_date is not None else 'missing'
         try:
             download_history(
@@ -882,18 +870,30 @@ def _refresh_csv_history_for_mode_updates(
                 target_end + timedelta(days=1),
                 csv_root,
                 output_path=output_path,
+                allow_incomplete_rows=allow_incomplete_rows,
             )
             refreshed.append(ticker)
             print(f'[AUTOCSV] refreshed {ticker}: previous_last={before}, target_end={target_end_et}, start={start_date.isoformat()}, path={output_path}')
         except Exception as exc:
-            failures.append(ticker)
-            print(f'[WARN] [AUTOCSV] {ticker}: refresh failed: {exc}')
-    if failures and policy == 'always':
-        print(f'[ABORT] automatic CSV refresh failed for: {", ".join(failures)}')
-        raise SystemExit(1)
+            msg = f'[ERR] [AUTOCSV] {ticker}: refresh failed: {exc}'
+            if '--allow-incomplete-csv-rows' in str(exc):
+                print(msg)
+                raise RuntimeError(msg) from exc
+            print(f'[WARN] {msg}')
     return refreshed
 
-def _import_csvs_into_states(states: Dict[str, Any], runtime: Dict[str, Any], csv_dir: str, tickers: List[str], prices_now_from: str, keep_history_rows: int, persist_market_snapshot: bool=True) -> List[ImportResult]:
+def _import_csvs_into_states(
+    states: Dict[str, Any],
+    runtime: Dict[str, Any],
+    csv_dir: str,
+    tickers: List[str],
+    prices_now_from: str,
+    keep_history_rows: int,
+    persist_market_snapshot: bool = True,
+    *,
+    allow_incomplete_rows: bool = False,
+    bypass_option_hint: str = "--allow-incomplete-csv-rows",
+) -> List[ImportResult]:
     market = states.setdefault('market', {})
     runtime_history = _runtime_history(runtime)
     prices_now = market.setdefault('prices_now', {})
@@ -907,7 +907,12 @@ def _import_csvs_into_states(states: Dict[str, Any], runtime: Dict[str, Any], cs
             results.append(ImportResult(ticker=ticker, status='skipped_missing', csv_path='', message=msg))
             continue
         try:
-            rows = _read_ohlcv_csv(csv_path, keep_last_n=keep_history_rows)
+            rows = _read_ohlcv_csv(
+                csv_path,
+                keep_last_n=keep_history_rows,
+                allow_incomplete_rows=allow_incomplete_rows,
+                bypass_option_hint=bypass_option_hint,
+            )
             last_date = rows[-1]['Date'] if rows else ''
             last_close = rows[-1]['Close'] if rows else None
             runtime_history[ticker] = {'columns': ['Date', 'Open', 'High', 'Low', 'Close', 'Volume'], 'rows': rows, 'window_trading_days': keep_history_rows, 'source': os.path.basename(csv_path)}
@@ -920,6 +925,8 @@ def _import_csvs_into_states(states: Dict[str, Any], runtime: Dict[str, Any], cs
             msg = f'[ERR] {ticker}: failed to read {csv_path}: {e}'
             print(msg)
             results.append(ImportResult(ticker=ticker, status='error', csv_path=csv_path, message=msg))
+            if '--allow-incomplete-csv-rows' in str(e):
+                raise RuntimeError(msg) from e
             continue
     imported_dates = [r.last_date for r in results if r.status == 'imported' and r.last_date]
     if persist_market_snapshot and imported_dates:
@@ -1388,13 +1395,32 @@ def _mode_required_operations_requested(args: argparse.Namespace) -> bool:
 def _standalone_update_allowed_without_mode(args: argparse.Namespace) -> bool:
     return bool(getattr(args, 'imported_trades_json', None) or getattr(args, 'cash_adjust_usd', None) is not None or getattr(args, 'cash_transfer_to_reserve_usd', None) is not None or (getattr(args, 'initial_investment_usd', None) is not None))
 
-def _late_hydrate_new_position_tickers(states: Dict[str, Any], runtime: Dict[str, Any], csv_dir: str, prices_now_from: str, keep_history_rows: int, already_processed: List[str]) -> List[ImportResult]:
+def _late_hydrate_new_position_tickers(
+    states: Dict[str, Any],
+    runtime: Dict[str, Any],
+    csv_dir: str,
+    prices_now_from: str,
+    keep_history_rows: int,
+    already_processed: List[str],
+    *,
+    allow_incomplete_rows: bool = False,
+    bypass_option_hint: str = "--allow-incomplete-csv-rows",
+) -> List[ImportResult]:
     known = {str(t or '').upper() for t in already_processed if str(t or '').strip()}
     late_tickers = [t for t in _discover_tickers_from_config(states, runtime) if t not in known]
     if not late_tickers:
         return []
     print(f"[INFO] late CSV hydration for new tickers from trades/cash updates: {', '.join(late_tickers)}")
-    return _import_csvs_into_states(states, runtime, csv_dir=csv_dir, tickers=late_tickers, prices_now_from=prices_now_from, keep_history_rows=keep_history_rows)
+    return _import_csvs_into_states(
+        states,
+        runtime,
+        csv_dir=csv_dir,
+        tickers=late_tickers,
+        prices_now_from=prices_now_from,
+        keep_history_rows=keep_history_rows,
+        allow_incomplete_rows=allow_incomplete_rows,
+        bypass_option_hint=bypass_option_hint,
+    )
 
 def _run_main(args: argparse.Namespace) -> int:
     states_path = args.states
@@ -1458,14 +1484,22 @@ def _run_main(args: argparse.Namespace) -> int:
         tickers=tickers,
         now_et=now_et,
         mode_label=mode_label,
-        refresh_policy=str(getattr(args, 'refresh_csv', 'auto') or 'auto'),
+        allow_incomplete_rows=bool(getattr(args, 'allow_incomplete_csv_rows', False)),
     )
     keep_history_rows = args.keep_history_rows if args.keep_history_rows > 0 else _compute_keep_history_rows(states, runtime)
     out_path = args.out.strip()
     if not out_path:
         p = Path(states_path)
         out_path = str(p.with_name(f'{p.stem}.updated.json'))
-    results = _import_csvs_into_states(states, runtime, csv_dir=args.csv_dir, tickers=tickers, prices_now_from=args.prices_now_from, keep_history_rows=keep_history_rows)
+    results = _import_csvs_into_states(
+        states,
+        runtime,
+        csv_dir=args.csv_dir,
+        tickers=tickers,
+        prices_now_from=args.prices_now_from,
+        keep_history_rows=keep_history_rows,
+        allow_incomplete_rows=bool(getattr(args, 'allow_incomplete_csv_rows', False)),
+    )
     processed_tickers = list(tickers)
     _normalize_trades_inplace(trades, cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]))
     if args.imported_trades_json:
@@ -1495,7 +1529,15 @@ def _run_main(args: argparse.Namespace) -> int:
                 print(f'[OK] trades import {import_label}: parsed={len(incoming)}, added={added}, dup={dup}, mode={mode}, portfolio_delta={portfolio_delta_desc}')
             except Exception as e:
                 print(f'[ERR] trades import failed for {import_path}: {e}')
-    late_results = _late_hydrate_new_position_tickers(states, runtime, csv_dir=args.csv_dir, prices_now_from=args.prices_now_from, keep_history_rows=keep_history_rows, already_processed=processed_tickers)
+    late_results = _late_hydrate_new_position_tickers(
+        states,
+        runtime,
+        csv_dir=args.csv_dir,
+        prices_now_from=args.prices_now_from,
+        keep_history_rows=keep_history_rows,
+        already_processed=processed_tickers,
+        allow_incomplete_rows=bool(getattr(args, 'allow_incomplete_csv_rows', False)),
+    )
     if late_results:
         results.extend(late_results)
         processed_tickers.extend([r.ticker for r in late_results])

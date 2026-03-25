@@ -336,7 +336,8 @@ python3 generate_report.py --states states.json --trades-file trades.json --sche
 Purpose: use an existing snapshot together with `data/*.csv` to compute the tactical plan on demand and generate the report for the specified mode.
 
 This command must explicitly include `--mode`.
-When `update_states.py` is run with `--mode`, it now attempts an automatic CSV refresh first. The refresh scope is limited to functionally active tickers: current holdings, strategy tickers, and configured FX pairs such as `TWD=X`.
+When `update_states.py` is run with `--mode`, it now attempts an automatic CSV refresh first. The refresh scope is limited to functionally active tickers: current holdings, strategy tickers, and configured FX pairs such as `TWD=X`. The mode update flow refreshes those active tickers every time instead of trusting the last CSV row to already be a finalized close.
+If a downloaded or local CSV row has incomplete OHLC values, the command fails by default. Use `--allow-incomplete-csv-rows` only when you intentionally want to bypass that failure and skip incomplete rows.
 
 ### 6.6 Tactical simulation / backtest
 
@@ -517,7 +518,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | `--states`        | Specify the state file                                       |
 | `--out`           | Specify the output state file                                |
 | `--csv-dir`       | Specify the market price CSV directory; defaults to `./data` if omitted |
-| `--refresh-csv`   | Control automatic CSV refresh before a mode update. `auto` is the default and refreshes only the active tickers needed by current holdings, strategy logic, and configured FX pairs |
+| `--allow-incomplete-csv-rows` | Bypass incomplete OHLC rows by skipping them instead of failing |
 | `--report-schema` | Specify the report schema                                    |
 | `--report-dir`    | Specify the report output directory                          |
 | `--report-out`    | Directly specify the report output filename                  |

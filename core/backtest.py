@@ -111,11 +111,23 @@ def _resolve_csv_path(runtime_config: Dict[str, Any], csv_dir: str, ticker: str)
     return path
 
 
-def _load_history_map(runtime_config: Dict[str, Any], csv_dir: str, tickers: List[str]) -> Dict[str, Dict[str, Any]]:
+def _load_history_map(
+    runtime_config: Dict[str, Any],
+    csv_dir: str,
+    tickers: List[str],
+    *,
+    allow_incomplete_rows: bool = False,
+    bypass_option_hint: str = "--allow-incomplete-csv-rows",
+) -> Dict[str, Dict[str, Any]]:
     history_map: Dict[str, Dict[str, Any]] = {}
     for ticker in tickers:
         csv_path = _resolve_csv_path(runtime_config, csv_dir, ticker)
-        rows = _read_ohlcv_csv(str(csv_path), keep_last_n=None)
+        rows = _read_ohlcv_csv(
+            str(csv_path),
+            keep_last_n=None,
+            allow_incomplete_rows=allow_incomplete_rows,
+            bypass_option_hint=bypass_option_hint,
+        )
         history_map[ticker] = {
             "columns": ["Date", "Open", "High", "Low", "Close", "Volume"],
             "rows": rows,
@@ -774,6 +786,7 @@ def run_backtest(
     start_date_et: Optional[str] = None,
     end_date_et: Optional[str] = None,
     starting_cash: Optional[float] = None,
+    allow_incomplete_rows: bool = False,
 ) -> Dict[str, Any]:
     raw_config, runtime_config = _load_backtest_config(config_path)
     precision = state_engine_numeric_precision(runtime_config)
@@ -782,7 +795,7 @@ def run_backtest(
     if not tactical_tickers:
         raise ValueError("state_engine.tactical_indicators is empty")
     tickers = tactical_tickers
-    history_map = _load_history_map(runtime_config, csv_dir, tickers)
+    history_map = _load_history_map(runtime_config, csv_dir, tickers, allow_incomplete_rows=allow_incomplete_rows)
     trading_dates = _select_backtest_dates(
         _common_trading_dates(history_map),
         runtime_config,

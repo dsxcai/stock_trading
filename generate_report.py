@@ -36,6 +36,7 @@ def main() -> None:
     parser.add_argument("--out", default="", help="Explicit output path for the rendered markdown report")
     parser.add_argument("--out-dir", default=".", help="Output directory used when --out is not set")
     parser.add_argument("--csv-dir", default="data", help="CSV directory used to derive transient tactical rows when states.json omits them")
+    parser.add_argument("--allow-incomplete-csv-rows", action="store_true", help="Bypass incomplete OHLC rows by skipping them instead of failing")
     parser.add_argument("--derive-signals-inputs", default="force", choices=["never", "missing", "force"], help="How to derive transient signals inputs for report rendering")
     parser.add_argument("--derive-threshold-inputs", default="force", choices=["never", "missing", "force"], help="How to derive transient threshold inputs for report rendering")
     parser.add_argument("--log-file", default="", help="Optional render log path")
@@ -73,6 +74,7 @@ def main() -> None:
             prices_now_from="close",
             keep_history_rows=keep_history_rows,
             persist_market_snapshot=False,
+            allow_incomplete_rows=bool(args.allow_incomplete_csv_rows),
         )
         _rebuild_market_snapshot_from_history(states, engine_runtime)
         _reprice_and_totals(states, engine_runtime)

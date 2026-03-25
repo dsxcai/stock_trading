@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--start-date", default="", help="Optional inclusive YYYY-MM-DD backtest start date")
     parser.add_argument("--end-date", default="", help="Optional inclusive YYYY-MM-DD backtest end date")
     parser.add_argument("--starting-cash", type=float, default=0.0, help="Optional override for starting cash")
+    parser.add_argument("--allow-incomplete-csv-rows", action="store_true", help="Bypass incomplete OHLC rows by skipping them instead of failing")
     parser.add_argument("--out-dir", default="backtest", help="Directory for backtest outputs")
     parser.add_argument("--log-file", default="", help="Optional run log path")
     args = parser.parse_args()
@@ -37,6 +38,7 @@ def main() -> None:
             start_date_et=(args.start_date or None),
             end_date_et=(args.end_date or None),
             starting_cash=(args.starting_cash if args.starting_cash > 0 else None),
+            allow_incomplete_rows=bool(args.allow_incomplete_csv_rows),
         )
         written = write_backtest_outputs(result, args.out_dir)
         gross = (result.get("gross") or {}).get("summary") or {}

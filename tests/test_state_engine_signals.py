@@ -441,7 +441,7 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
             lines.append(f"{day},1,1,1,{float(idx):.4f},0")
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    def test_refresh_csv_history_for_mode_updates_downloads_only_stale_active_tickers(self) -> None:
+    def test_refresh_csv_history_for_mode_updates_downloads_all_active_tickers(self) -> None:
         runtime = self._runtime_for_refresh()
         states = {"portfolio": {"positions": [{"ticker": "AAA", "shares": 1, "cost_usd": 100.0}]}}
         now_et = datetime.fromisoformat("2026-03-24T08:00:00-04:00")
@@ -459,15 +459,79 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
                     tickers=["AAA", "BBB", "CCC", "DDD", "TWD=X"],
                     now_et=now_et,
                     mode_label="Premarket",
-                    refresh_policy="auto",
                 )
 
-        self.assertEqual(set(refreshed), {"AAA", "CCC", "DDD", "TWD=X"})
+        self.assertEqual(set(refreshed), {"AAA", "BBB", "CCC", "DDD", "TWD=X"})
         requested = [call.args[0] for call in mocked_download.call_args_list]
-        self.assertEqual(set(requested), {"AAA", "CCC", "DDD", "TWD=X"})
-        self.assertNotIn("BBB", requested)
+        self.assertEqual(set(requested), {"AAA", "BBB", "CCC", "DDD", "TWD=X"})
 
-    def test_refresh_csv_history_for_mode_updates_skips_without_mode_under_auto_policy(self) -> None:
+    def test_refresh_csv_history_for_mode_updates_redownloads_target_end_rows(self) -> None:
+        runtime = self._runtime_for_refresh()
+        now_et = datetime.fromisoformat("2026-03-24T08:00:00-04:00")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_dir = Path(tmp)
+            self._write_csv(csv_dir / "AAA.csv", "2026-03-20", "2026-03-23")
+            with mock.patch("download_1y.yf", object()), mock.patch("download_1y.download_history") as mocked_download:
+                refreshed = state_engine._refresh_csv_history_for_mode_updates(
+                    {},
+                    runtime,
+                    csv_dir=str(csv_dir),
+                    tickers=["AAA"],
+                    now_et=now_et,
+                    mode_label="Premarket",
+                )
+
+        self.assertEqual(refreshed, ["AAA"])
+        mocked_download.assert_called_once()
+
+    def test_refresh_csv_history_for_mode_updates_errors_on_incomplete_download_rows(self) -> None:
+        runtime = self._runtime_for_refresh()
+        now_et = datetime.fromisoformat("2026-03-24T08:00:00-04:00")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_dir = Path(tmp)
+            self._write_csv(csv_dir / "AAA.csv", "2026-03-20", "2026-03-23")
+            with mock.patch("download_1y.yf", object()), mock.patch(
+                "download_1y.download_history",
+                side_effect=ValueError(
+                    "AAA: downloaded history contains incomplete OHLC data for Date=2026-03-24. "
+                    "Re-run with --allow-incomplete-csv-rows to bypass and skip incomplete rows."
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, r"--allow-incomplete-csv-rows"):
+                    state_engine._refresh_csv_history_for_mode_updates(
+                        {},
+                        runtime,
+                        csv_dir=str(csv_dir),
+                        tickers=["AAA"],
+                        now_et=now_et,
+                        mode_label="Premarket",
+                    )
+
+    def test_import_csvs_into_states_errors_on_incomplete_local_rows(self) -> None:
+        runtime = {"config": {"numeric_precision": _numeric_precision()}, "history": {}}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_dir = Path(tmp)
+            self._write_csv(csv_dir / "AAA.csv", "2026-03-24")
+            (csv_dir / "AAA.csv").write_text(
+                "Date,Open,High,Low,Close,Volume\n"
+                "2026-03-24,1,1,1,1,0\n"
+                "2026-03-25,1,1,1,,0\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, r"--allow-incomplete-csv-rows"):
+                state_engine._import_csvs_into_states(
+                    {},
+                    runtime,
+                    csv_dir=str(csv_dir),
+                    tickers=["AAA"],
+                    prices_now_from="close",
+                    keep_history_rows=0,
+                )
+
+    def test_refresh_csv_history_for_mode_updates_skips_without_mode(self) -> None:
         runtime = self._runtime_for_refresh()
         now_et = datetime.fromisoformat("2026-03-24T08:00:00-04:00")
         with tempfile.TemporaryDirectory() as tmp:
@@ -479,7 +543,6 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
                     tickers=["AAA"],
                     now_et=now_et,
                     mode_label="",
-                    refresh_policy="auto",
                 )
 
         self.assertEqual(refreshed, [])

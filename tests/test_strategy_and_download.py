@@ -56,6 +56,39 @@ class StrategyAndDownloadTests(unittest.TestCase):
             self.assertEqual(rows[0]["Close"], 3.5)
             self.assertEqual(rows[1]["Date"], "2026-03-18")
 
+    def test_read_ohlcv_csv_errors_on_incomplete_rows_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "TWD=X.csv"
+            csv_path.write_text(
+                "Date,Open,High,Low,Close,Volume\n"
+                "2026-03-24,31.8619,32.0890,31.8335,31.8620,0\n"
+                "2026-03-25,31.9240,32.0010,31.8600,,0\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, r"--allow-incomplete-csv-rows"):
+                _read_ohlcv_csv(str(csv_path), keep_last_n=None)
+
+    def test_read_ohlcv_csv_can_bypass_incomplete_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "TWD=X.csv"
+            csv_path.write_text(
+                "Date,Open,High,Low,Close,Volume\n"
+                "2026-03-24,31.8619,32.0890,31.8335,31.8620,0\n"
+                "2026-03-25,31.9240,32.0010,31.8600,,0\n",
+                encoding="utf-8",
+            )
+            rows = _read_ohlcv_csv(str(csv_path), keep_last_n=None, allow_incomplete_rows=True)
+            self.assertEqual(rows, [
+                {
+                    "Date": "2026-03-24",
+                    "Open": 31.8619,
+                    "High": 32.089,
+                    "Low": 31.8335,
+                    "Close": 31.862,
+                    "Volume": 0,
+                }
+            ])
+
     def test_normalize_history_frame_flattens_and_formats_download_output(self) -> None:
         index = pd.to_datetime(["2022-12-05", "2022-12-06", "2022-12-07"])
         columns = pd.MultiIndex.from_tuples([
@@ -95,6 +128,33 @@ class StrategyAndDownloadTests(unittest.TestCase):
         normalized = _normalize_history_frame(frame, "TWD=X")
         self.assertEqual(list(normalized.columns), ["Open", "High", "Low", "Close", "Volume"])
         self.assertEqual(normalized["Volume"].tolist(), [0, 0])
+
+    def test_normalize_history_frame_errors_on_incomplete_rows_by_default(self) -> None:
+        index = pd.to_datetime(["2026-03-24", "2026-03-25"])
+        frame = pd.DataFrame(
+            [
+                [31.8619, 32.0890, 31.8335, 31.8620],
+                [31.9240, 32.0010, 31.8600, float("nan")],
+            ],
+            index=index,
+            columns=["Open", "High", "Low", "Close"],
+        )
+        with self.assertRaisesRegex(ValueError, r"--allow-incomplete-csv-rows"):
+            _normalize_history_frame(frame, "TWD=X")
+
+    def test_normalize_history_frame_can_bypass_incomplete_rows(self) -> None:
+        index = pd.to_datetime(["2026-03-24", "2026-03-25"])
+        frame = pd.DataFrame(
+            [
+                [31.8619, 32.0890, 31.8335, 31.8620],
+                [31.9240, 32.0010, 31.8600, float("nan")],
+            ],
+            index=index,
+            columns=["Open", "High", "Low", "Close"],
+        )
+        normalized = _normalize_history_frame(frame, "TWD=X", allow_incomplete_rows=True)
+        self.assertEqual(normalized.index.strftime("%Y-%m-%d").tolist(), ["2026-03-24"])
+        self.assertEqual(normalized["Close"].tolist(), [31.862])
 
     def test_load_tickers_from_config_includes_configured_fx_pairs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

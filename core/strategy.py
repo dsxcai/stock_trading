@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import csv
+import math
 import re
 from typing import Any, Dict, List, Optional
 
 from core.models import OHLCVRow, SignalInputs, ThresholdInputs
 from utils.parsers import _to_yyyy_mm_dd
 from utils.precision import format_currency, format_fixed
+
+_REQUIRED_PRICE_COLUMNS = ("Open", "High", "Low", "Close")
 
 
 def _parse_indicator_window(ma_rule: str) -> Optional[int]:
@@ -49,7 +52,13 @@ def _dedupe_by_date_keep_last(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return [deduped[key] for key in sorted(deduped.keys())]
 
 
-def _read_ohlcv_csv(csv_path: str, keep_last_n: Optional[int]) -> List[Dict[str, Any]]:
+def _read_ohlcv_csv(
+    csv_path: str,
+    keep_last_n: Optional[int],
+    *,
+    allow_incomplete_rows: bool = False,
+    bypass_option_hint: str = "--allow-incomplete-csv-rows",
+) -> List[Dict[str, Any]]:
     """Read OHLCV data from a canonical Date/Open/High/Low/Close/Volume CSV."""
     rows: List[Dict[str, Any]] = []
     with open(csv_path, "r", encoding="utf-8-sig", newline="") as handle:
@@ -58,13 +67,31 @@ def _read_ohlcv_csv(csv_path: str, keep_last_n: Optional[int]) -> List[Dict[str,
         for column in required_columns:
             if reader.fieldnames is None or column not in reader.fieldnames:
                 raise ValueError(f"{csv_path}: missing column {column}. Found: {reader.fieldnames}")
-        for raw_row in reader:
+        for line_no, raw_row in enumerate(reader, start=2):
+            price_values = []
+            try:
+                for column in _REQUIRED_PRICE_COLUMNS:
+                    raw_value = str(raw_row[column]).strip()
+                    if not raw_value:
+                        raise ValueError("missing required price")
+                    parsed = float(raw_value)
+                    if math.isnan(parsed):
+                        raise ValueError("nan required price")
+                    price_values.append(parsed)
+            except Exception as exc:
+                if allow_incomplete_rows:
+                    continue
+                date_text = str(raw_row.get("Date") or "").strip() or "unknown"
+                raise ValueError(
+                    f"{csv_path}: row {line_no} (Date={date_text}) has incomplete OHLC data. "
+                    f"Re-run with {bypass_option_hint} to bypass and skip incomplete rows."
+                ) from exc
             row = OHLCVRow(
                 date=_to_yyyy_mm_dd(raw_row["Date"]),
-                open=float(raw_row["Open"]),
-                high=float(raw_row["High"]),
-                low=float(raw_row["Low"]),
-                close=float(raw_row["Close"]),
+                open=price_values[0],
+                high=price_values[1],
+                low=price_values[2],
+                close=price_values[3],
                 volume=int(float(raw_row["Volume"])) if str(raw_row["Volume"]).strip() else 0,
             )
             rows.append(row.as_dict())

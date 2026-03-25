@@ -73,7 +73,13 @@ def _flatten_download_columns(data: pd.DataFrame) -> pd.DataFrame:
     return flattened
 
 
-def _normalize_history_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
+def _normalize_history_frame(
+    data: pd.DataFrame,
+    ticker: str,
+    *,
+    allow_incomplete_rows: bool = False,
+    bypass_option_hint: str = "--allow-incomplete-csv-rows",
+) -> pd.DataFrame:
     """Normalize downloaded history into Date,Open,High,Low,Close,Volume CSV layout."""
     normalized = _flatten_download_columns(data)
     normalized = normalized.rename(columns=lambda value: str(value).title())
@@ -85,7 +91,20 @@ def _normalize_history_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
         normalized["Volume"] = 0
 
     normalized = normalized[EXPORT_COLUMNS].copy()
-    normalized[PRICE_COLUMNS] = normalized[PRICE_COLUMNS].apply(pd.to_numeric, errors="raise").round(4)
+    normalized[PRICE_COLUMNS] = normalized[PRICE_COLUMNS].apply(pd.to_numeric, errors="coerce").round(4)
+    invalid_mask = normalized[PRICE_COLUMNS].isna().any(axis=1)
+    if bool(invalid_mask.any()):
+        invalid_dates = pd.to_datetime(normalized.index[invalid_mask], errors="coerce")
+        first_bad = invalid_dates[0] if len(invalid_dates) > 0 else None
+        first_bad_text = first_bad.strftime("%Y-%m-%d") if not pd.isna(first_bad) else "unknown"
+        if not allow_incomplete_rows:
+            raise ValueError(
+                f"{ticker}: downloaded history contains incomplete OHLC data for Date={first_bad_text}. "
+                f"Re-run with {bypass_option_hint} to bypass and skip incomplete rows."
+            )
+        normalized = normalized.loc[~invalid_mask].copy()
+    if normalized.empty:
+        raise ValueError(f"No complete OHLC rows returned for {ticker}")
     normalized["Volume"] = pd.to_numeric(normalized["Volume"], errors="raise").astype("int64")
 
     normalized.index = pd.to_datetime(normalized.index, errors="raise")
@@ -102,6 +121,8 @@ def download_history(
     output_dir: Path,
     *,
     output_path: Optional[Path] = None,
+    allow_incomplete_rows: bool = False,
+    bypass_option_hint: str = "--allow-incomplete-csv-rows",
 ) -> Path:
     """Download one ticker's daily history and write it as CSV."""
     data = yf.download(
@@ -115,7 +136,12 @@ def download_history(
     if data.empty:
         raise ValueError(f"No history returned for {ticker}")
 
-    normalized = _normalize_history_frame(data, ticker)
+    normalized = _normalize_history_frame(
+        data,
+        ticker,
+        allow_incomplete_rows=allow_incomplete_rows,
+        bypass_option_hint=bypass_option_hint,
+    )
     csv_path = output_path if output_path is not None else (output_dir / f"{ticker}.csv")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     normalized.to_csv(csv_path, float_format="%.4f")
@@ -129,6 +155,7 @@ def main() -> None:
     parser.add_argument("--start")
     parser.add_argument("--end", default="")
     parser.add_argument("--tickers", default="")
+    parser.add_argument("--allow-incomplete-csv-rows", action="store_true", help="Bypass incomplete OHLC rows from the download source by skipping them")
     parser.add_argument("--log-file", default="")
     args = parser.parse_args()
 
@@ -153,7 +180,13 @@ def main() -> None:
     failures: list[str] = []
     for ticker in tickers:
         try:
-            path = download_history(ticker, start_date, end_date + dt.timedelta(days=1), output_dir)
+            path = download_history(
+                ticker,
+                start_date,
+                end_date + dt.timedelta(days=1),
+                output_dir,
+                allow_incomplete_rows=bool(args.allow_incomplete_csv_rows),
+            )
             logger.info(f"[OK] wrote {path}")
         except Exception as exc:
             failures.append(ticker)
