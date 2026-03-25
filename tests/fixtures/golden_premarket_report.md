@@ -18,13 +18,13 @@
 ## Current Positions
 | Bucket | Ticker | Shares | Cost (USD) | Price (Now) | Market Value (USD) | Unrealized PnL (USD) | Unrealized PnL (TWD) | Unrealized PnL % | Unrealized PnL % (TWD) | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Core | ARKQ | 70 | $8,698.20 | 121.8500 | $8,529.50 | $-168.70 | -841.22 | -1.94% | -0.31% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
-| Core | SPY | 17 | $11,618.54 | 670.7900 | $11,403.43 | $-215.11 | -1,232.47 | -1.85% | -0.34% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
-| Tactical | SMH | 29 | $11,494.64 | 396.8800 | $11,509.52 | $14.88 | -589.18 | 0.13% | -0.16% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
-| Core Subtotal | - | - | $20,316.74 | - | $19,932.93 | $-383.81 | -2,073.69 | -1.89% | -0.33% | - |
-| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,509.52 | $14.88 | -589.18 | 0.13% | -0.16% | - |
+| Core | ARKQ | 70 | $8,698.20 | 121.8500 | $8,529.50 | $-168.70 | -576.81 | -1.94% | -0.21% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
+| Core | SPY | 17 | $11,618.54 | 670.7900 | $11,403.43 | $-215.11 | -878.97 | -1.85% | -0.24% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
+| Tactical | SMH | 29 | $11,494.64 | 396.8800 | $11,509.52 | $14.88 | -232.39 | 0.13% | -0.06% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
+| Core Subtotal | - | - | $20,316.74 | - | $19,932.93 | $-383.81 | -1,455.77 | -1.89% | -0.23% | - |
+| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,509.52 | $14.88 | -232.39 | 0.13% | -0.06% | - |
 | Cash Pool | - | - | - | - | $73.35 | - | - | - | - | - |
-| Portfolio Total | - | - | $31,811.38 | - | $31,515.80 | $-368.93 | -2,662.87 | -1.16% | -0.26% | - |
+| Portfolio Total | - | - | $31,811.38 | - | $31,515.80 | $-368.93 | -1,688.16 | -1.16% | -0.17% | - |
 
 ## Signal Status
 | Ticker | A: Close(t) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |

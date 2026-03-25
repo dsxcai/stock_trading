@@ -342,7 +342,7 @@ python3 generate_report.py --states states.json --trades-file trades.json --sche
 Purpose: use an existing snapshot together with `data/*.csv` to compute the tactical plan on demand and generate the report for the specified mode.
 
 This command must explicitly include `--mode`.
-When `update_states.py` is run with `--mode`, it now attempts an automatic CSV refresh first. The refresh scope is limited to functionally active tickers: current holdings, strategy tickers, and configured FX pairs such as `TWD=X`. The mode update flow refreshes those active tickers every time instead of trusting the last CSV row to already be a finalized close.
+When `update_states.py` is run with `--mode`, it now attempts an automatic CSV refresh first. The refresh scope is limited to functionally active tickers: current holdings, strategy tickers, and configured FX pairs such as `TWD=X`. The mode update flow refreshes those active tickers every time instead of trusting the last CSV row to already be a finalized close. For equities, the refresh end date still follows the mode's latest completed NYSE trading day. Configured FX pairs are allowed to refresh through the current ET date so same-day FX quotes can be used when available.
 If the input `states.json` is compact, the command reconstructs derived position fields such as bucket and FIFO cost basis from `trades.json` before loading CSV market data.
 If a downloaded or local CSV row has incomplete OHLC values, the command fails by default. Use `--allow-incomplete-csv-rows` only when you intentionally want to bypass that failure and skip incomplete rows.
 

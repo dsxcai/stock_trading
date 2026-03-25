@@ -960,6 +960,12 @@ def _latest_completed_market_day_et(runtime: Dict[str, Any], now_et: datetime) -
         return today.isoformat()
     return _prev_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
 
+def _autocsv_target_end_for_ticker(runtime: Dict[str, Any], ticker: str, now_et: datetime) -> date:
+    ticker_norm = str(ticker or '').upper().strip()
+    if ticker_norm and ticker_norm in _fx_tickers_from_config(runtime):
+        return now_et.date()
+    return date.fromisoformat(_latest_completed_market_day_et(runtime, now_et))
+
 def _refresh_csv_history_for_mode_updates(
     states: Dict[str, Any],
     runtime: Dict[str, Any],
@@ -973,9 +979,6 @@ def _refresh_csv_history_for_mode_updates(
     if not str(mode_label or '').strip():
         print('[AUTOCSV] skipped: no --mode supplied.')
         return []
-    target_end_et = _latest_completed_market_day_et(runtime, now_et)
-    target_end = date.fromisoformat(target_end_et)
-    default_start = target_end - timedelta(days=370)
     active_tickers: List[str] = []
     seen = set()
     for ticker in tickers or []:
@@ -984,14 +987,16 @@ def _refresh_csv_history_for_mode_updates(
             continue
         active_tickers.append(ticker_norm)
         seen.add(ticker_norm)
-    refresh_specs: List[Tuple[str, Path, date, Optional[date], Optional[date]]] = []
+    refresh_specs: List[Tuple[str, Path, date, date, Optional[date], Optional[date]]] = []
     for ticker in active_tickers:
+        target_end = _autocsv_target_end_for_ticker(runtime, ticker, now_et)
+        default_start = target_end - timedelta(days=370)
         candidates = _resolve_csv_candidates(runtime, csv_dir, ticker)
         existing_path = next((candidate for candidate in candidates if os.path.exists(candidate)), '')
         chosen_path = existing_path or (candidates[0] if candidates else os.path.join(csv_dir, f'{ticker}.csv'))
         first_date, last_date = _csv_date_bounds(chosen_path)
         start_date = first_date or default_start
-        refresh_specs.append((ticker, Path(chosen_path), start_date, first_date, last_date))
+        refresh_specs.append((ticker, Path(chosen_path), start_date, target_end, first_date, last_date))
     if not refresh_specs:
         print('[AUTOCSV] skipped: no active tickers resolved for refresh.')
         return []
@@ -1003,7 +1008,7 @@ def _refresh_csv_history_for_mode_updates(
     refreshed: List[str] = []
     csv_root = Path(csv_dir)
     csv_root.mkdir(parents=True, exist_ok=True)
-    for ticker, output_path, start_date, first_date, last_date in refresh_specs:
+    for ticker, output_path, start_date, target_end, first_date, last_date in refresh_specs:
         before = last_date.isoformat() if last_date is not None else 'missing'
         try:
             download_history(
@@ -1015,7 +1020,7 @@ def _refresh_csv_history_for_mode_updates(
                 allow_incomplete_rows=allow_incomplete_rows,
             )
             refreshed.append(ticker)
-            print(f'[AUTOCSV] refreshed {ticker}: previous_last={before}, target_end={target_end_et}, start={start_date.isoformat()}, path={output_path}')
+            print(f'[AUTOCSV] refreshed {ticker}: previous_last={before}, target_end={target_end.isoformat()}, start={start_date.isoformat()}, path={output_path}')
         except Exception as exc:
             msg = f'[ERR] [AUTOCSV] {ticker}: refresh failed: {exc}'
             if '--allow-incomplete-csv-rows' in str(exc):

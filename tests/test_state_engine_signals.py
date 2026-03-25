@@ -4,7 +4,7 @@ import argparse
 from contextlib import ExitStack
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -465,6 +465,34 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
         self.assertEqual(set(refreshed), {"AAA", "BBB", "CCC", "DDD", "TWD=X"})
         requested = [call.args[0] for call in mocked_download.call_args_list]
         self.assertEqual(set(requested), {"AAA", "BBB", "CCC", "DDD", "TWD=X"})
+        end_dates = {call.args[0]: call.args[2] for call in mocked_download.call_args_list}
+        self.assertEqual(end_dates["AAA"], date(2026, 3, 24))
+        self.assertEqual(end_dates["BBB"], date(2026, 3, 24))
+        self.assertEqual(end_dates["CCC"], date(2026, 3, 24))
+        self.assertEqual(end_dates["DDD"], date(2026, 3, 24))
+        self.assertEqual(end_dates["TWD=X"], date(2026, 3, 25))
+
+    def test_refresh_csv_history_for_mode_updates_allows_same_day_fx_rows(self) -> None:
+        runtime = self._runtime_for_refresh()
+        now_et = datetime.fromisoformat("2026-03-25T08:00:00-04:00")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_dir = Path(tmp)
+            self._write_csv(csv_dir / "TWD=X.csv", "2026-03-24")
+            self._write_csv(csv_dir / "AAA.csv", "2026-03-24")
+            with mock.patch("download_1y.yf", object()), mock.patch("download_1y.download_history") as mocked_download:
+                state_engine._refresh_csv_history_for_mode_updates(
+                    {},
+                    runtime,
+                    csv_dir=str(csv_dir),
+                    tickers=["AAA", "TWD=X"],
+                    now_et=now_et,
+                    mode_label="Premarket",
+                )
+
+        end_dates = {call.args[0]: call.args[2] for call in mocked_download.call_args_list}
+        self.assertEqual(end_dates["AAA"], date(2026, 3, 25))
+        self.assertEqual(end_dates["TWD=X"], date(2026, 3, 26))
 
     def test_refresh_csv_history_for_mode_updates_redownloads_target_end_rows(self) -> None:
         runtime = self._runtime_for_refresh()
