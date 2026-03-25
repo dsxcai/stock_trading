@@ -960,9 +960,11 @@ def _latest_completed_market_day_et(runtime: Dict[str, Any], now_et: datetime) -
         return today.isoformat()
     return _prev_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
 
-def _autocsv_target_end_for_ticker(runtime: Dict[str, Any], ticker: str, now_et: datetime) -> date:
+def _autocsv_target_end_for_ticker(runtime: Dict[str, Any], ticker: str, now_et: datetime, mode_label: str) -> date:
     ticker_norm = str(ticker or '').upper().strip()
     if ticker_norm and ticker_norm in _fx_tickers_from_config(runtime):
+        return now_et.date()
+    if _normalize_mode_key(mode_label) == 'intraday':
         return now_et.date()
     return date.fromisoformat(_latest_completed_market_day_et(runtime, now_et))
 
@@ -989,7 +991,7 @@ def _refresh_csv_history_for_mode_updates(
         seen.add(ticker_norm)
     refresh_specs: List[Tuple[str, Path, date, date, Optional[date], Optional[date]]] = []
     for ticker in active_tickers:
-        target_end = _autocsv_target_end_for_ticker(runtime, ticker, now_et)
+        target_end = _autocsv_target_end_for_ticker(runtime, ticker, now_et, mode_label)
         default_start = target_end - timedelta(days=370)
         candidates = _resolve_csv_candidates(runtime, csv_dir, ticker)
         existing_path = next((candidate for candidate in candidates if os.path.exists(candidate)), '')

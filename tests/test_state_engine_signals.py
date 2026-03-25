@@ -494,6 +494,28 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
         self.assertEqual(end_dates["AAA"], date(2026, 3, 25))
         self.assertEqual(end_dates["TWD=X"], date(2026, 3, 26))
 
+    def test_refresh_csv_history_for_intraday_updates_uses_same_day_equity_rows(self) -> None:
+        runtime = self._runtime_for_refresh()
+        now_et = datetime.fromisoformat("2026-03-25T11:30:00-04:00")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_dir = Path(tmp)
+            self._write_csv(csv_dir / "AAA.csv", "2026-03-24")
+            self._write_csv(csv_dir / "TWD=X.csv", "2026-03-24")
+            with mock.patch("download_1y.yf", object()), mock.patch("download_1y.download_history") as mocked_download:
+                state_engine._refresh_csv_history_for_mode_updates(
+                    {},
+                    runtime,
+                    csv_dir=str(csv_dir),
+                    tickers=["AAA", "TWD=X"],
+                    now_et=now_et,
+                    mode_label="Intraday",
+                )
+
+        end_dates = {call.args[0]: call.args[2] for call in mocked_download.call_args_list}
+        self.assertEqual(end_dates["AAA"], date(2026, 3, 26))
+        self.assertEqual(end_dates["TWD=X"], date(2026, 3, 26))
+
     def test_refresh_csv_history_for_mode_updates_redownloads_target_end_rows(self) -> None:
         runtime = self._runtime_for_refresh()
         now_et = datetime.fromisoformat("2026-03-24T08:00:00-04:00")
