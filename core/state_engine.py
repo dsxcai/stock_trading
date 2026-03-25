@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse
+import copy
 import csv
 import json
 import os
@@ -89,10 +90,12 @@ def _save_json(obj: Dict[str, Any], path: str) -> str:
     payload = json.dumps(obj, ensure_ascii=False, indent=2)
     p = Path(path)
     try:
+        p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(payload, encoding='utf-8')
         return str(p)
     except PermissionError:
         fallback = p.with_name(f'{p.stem}.new{p.suffix}')
+        fallback.parent.mkdir(parents=True, exist_ok=True)
         fallback.write_text(payload, encoding='utf-8')
         print(f'[WARN] Cannot write {p} (permission denied). Wrote fallback: {fallback}')
         return str(fallback)
@@ -455,6 +458,91 @@ def _strip_persisted_report_transients(states: Dict[str, Any]) -> None:
             states.pop('meta', None)
     states.pop('by_mode', None)
 
+
+def _compact_persistent_states(states: Dict[str, Any]) -> Dict[str, Any]:
+    compacted = copy.deepcopy(states if isinstance(states, dict) else {})
+    if not isinstance(compacted, dict):
+        return {'portfolio': {'positions': [], 'cash': {'usd': 0.0}}}
+
+    _strip_persisted_report_transients(compacted)
+    compacted.pop('_report_meta', None)
+    compacted.pop('config', None)
+    compacted.pop('market', None)
+
+    portfolio = compacted.setdefault('portfolio', {})
+    if not isinstance(portfolio, dict):
+        portfolio = {}
+        compacted['portfolio'] = portfolio
+
+    positions_src = portfolio.get('positions') or []
+    positions: List[Dict[str, Any]] = []
+    if isinstance(positions_src, list):
+        for pos in positions_src:
+            if not isinstance(pos, dict):
+                continue
+            ticker = str(pos.get('ticker') or '').upper().strip()
+            if not ticker:
+                continue
+            try:
+                shares = int(round(float(pos.get('shares') or 0.0)))
+            except Exception:
+                shares = 0
+            if shares <= 0:
+                continue
+            positions.append({'ticker': ticker, 'shares': shares})
+    portfolio['positions'] = positions
+
+    cash = portfolio.get('cash')
+    if not isinstance(cash, dict):
+        cash = {'usd': 0.0}
+        portfolio['cash'] = cash
+    try:
+        cash['usd'] = float(cash.get('usd') or 0.0)
+    except Exception:
+        cash['usd'] = 0.0
+
+    portfolio.pop('totals', None)
+
+    performance = portfolio.get('performance')
+    if isinstance(performance, dict):
+        for key in (
+            'current_total_assets_usd',
+            'net_external_cash_flow_usd',
+            'effective_capital_base_usd',
+            'profit_usd',
+            'profit_rate',
+            'returns',
+        ):
+            performance.pop(key, None)
+        if not performance:
+            portfolio.pop('performance', None)
+
+    return compacted
+
+
+def _positions_need_trade_hydration(states: Dict[str, Any]) -> bool:
+    positions = (((states.get('portfolio') or {}).get('positions')) or [])
+    if not isinstance(positions, list):
+        return True
+    if not positions:
+        return True
+    for pos in positions:
+        if not isinstance(pos, dict):
+            return True
+        if pos.get('cost_usd') is None:
+            return True
+        if not str(pos.get('bucket') or '').strip():
+            return True
+    return False
+
+
+def _hydrate_positions_from_trade_ledger_if_needed(states: Dict[str, Any], runtime: Dict[str, Any], trades: List[Dict[str, Any]]) -> None:
+    if not isinstance(trades, list) or not trades:
+        return
+    if not _positions_need_trade_hydration(states):
+        return
+    _rebuild_portfolio_positions_from_day1_fifo(states, runtime, trades)
+
 def _build_report_output(
     states: Dict[str, Any],
     schema_path: str,
@@ -467,9 +555,6 @@ def _build_report_output(
     report_meta: Optional[Dict[str, Any]] = None,
     market_history: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str]:
-    from core.reporting import load_schema as _load_report_schema, render_report as _render_report_markdown
-
-    schema = _load_report_schema(schema_path)
     report_root = build_report_root(
         states,
         config=config,
@@ -478,18 +563,75 @@ def _build_report_output(
         report_meta=report_meta,
         market_history=market_history,
     )
-    md = _render_report_markdown(report_root, schema, mode)
+    md, out_path = _render_report_output(
+        report_root,
+        schema_path=schema_path,
+        report_dir=report_dir,
+        report_out=report_out,
+        mode=mode,
+        report_meta=report_meta,
+    )
+    return (md, out_path)
+
+
+def _build_report_output_path(
+    report_dir: str,
+    report_out: str,
+    mode: str,
+    report_meta: Optional[Dict[str, Any]] = None,
+    states: Optional[Dict[str, Any]] = None,
+) -> str:
     meta = dict(report_meta or {})
-    if not meta:
+    if not meta and isinstance(states, dict):
         meta = _effective_report_meta(states, mode)
     report_date = _report_date_from_meta(meta)
     if not report_date:
         report_date = datetime.now().strftime('%Y-%m-%d')
     mode_key = _normalize_mode_key(mode) or 'report'
     if str(report_out or '').strip():
-        out_path = str(report_out).strip()
-    else:
-        out_path = str(Path(report_dir) / f'{report_date}_{mode_key}.md')
+        return str(report_out).strip()
+    return str(Path(report_dir) / f'{report_date}_{mode_key}.md')
+
+
+def _build_report_json_output_path(
+    report_dir: str,
+    report_json_out: str,
+    mode: str,
+    report_meta: Optional[Dict[str, Any]] = None,
+    states: Optional[Dict[str, Any]] = None,
+) -> str:
+    meta = dict(report_meta or {})
+    if not meta and isinstance(states, dict):
+        meta = _effective_report_meta(states, mode)
+    report_date = _report_date_from_meta(meta)
+    if not report_date:
+        report_date = datetime.now().strftime('%Y-%m-%d')
+    mode_key = _normalize_mode_key(mode) or 'report'
+    if str(report_json_out or '').strip():
+        return str(report_json_out).strip()
+    return str(Path(report_dir) / f'{report_date}_{mode_key}.json')
+
+
+def _render_report_output(
+    report_root: Dict[str, Any],
+    *,
+    schema_path: str,
+    report_dir: str,
+    report_out: str,
+    mode: str,
+    report_meta: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    from core.reporting import load_schema as _load_report_schema, render_report as _render_report_markdown
+
+    schema = _load_report_schema(schema_path)
+    md = _render_report_markdown(report_root, schema, mode)
+    out_path = _build_report_output_path(
+        report_dir=report_dir,
+        report_out=report_out,
+        mode=mode,
+        report_meta=report_meta,
+        states=report_root,
+    )
     return (md, out_path)
 
 def _version_anchor_day_et(mode: Any, t_et: str, t_plus_1_et: Optional[str]) -> Optional[str]:
@@ -1395,6 +1537,17 @@ def _mode_required_operations_requested(args: argparse.Namespace) -> bool:
 def _standalone_update_allowed_without_mode(args: argparse.Namespace) -> bool:
     return bool(getattr(args, 'imported_trades_json', None) or getattr(args, 'cash_adjust_usd', None) is not None or getattr(args, 'cash_transfer_to_reserve_usd', None) is not None or (getattr(args, 'initial_investment_usd', None) is not None))
 
+
+def _has_persistent_state_updates_requested(args: argparse.Namespace) -> bool:
+    return bool(
+        getattr(args, 'imported_trades_json', None)
+        or getattr(args, 'cash_adjust_usd', None) is not None
+        or getattr(args, 'cash_transfer_to_reserve_usd', None) is not None
+        or getattr(args, 'initial_investment_usd', None) is not None
+        or getattr(args, 'broker_investment_total_usd', None) is not None
+        or getattr(args, 'tactical_cash_usd', None) is not None
+    )
+
 def _late_hydrate_new_position_tickers(
     states: Dict[str, Any],
     runtime: Dict[str, Any],
@@ -1434,6 +1587,7 @@ def _run_main(args: argparse.Namespace) -> int:
     _migrate_state_schema(states)
     _ensure_trading_calendar(runtime)
     _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+    _hydrate_positions_from_trade_ledger_if_needed(states, runtime, trades)
     mode_label = str(args.mode or '').strip()
     if not mode_label:
         if args.render_report:
@@ -1606,6 +1760,7 @@ def _run_main(args: argparse.Namespace) -> int:
         config=_runtime_config(runtime),
         trades=trades,
         tactical_plan=tactical_plan,
+        report_meta=report_meta,
         market_history=_runtime_history(runtime),
     )
     if mode_label:
@@ -1631,30 +1786,43 @@ def _run_main(args: argparse.Namespace) -> int:
     }, ndigits=int(numeric_precision["state_selected_fields"]))
     report_md = None
     report_out_path = None
+    report_json_written = None
+    if mode_label:
+        report_json_path = _build_report_json_output_path(
+            report_dir=str(args.report_dir),
+            report_json_out=str(getattr(args, 'report_json_out', '') or ''),
+            mode=mode_label,
+            report_meta=report_meta,
+            states=report_root,
+        )
+        report_json_written = _save_json(report_root, report_json_path)
+        print(f'[OK] wrote {report_json_written}')
     if args.render_report:
-        report_md, report_out_path = _build_report_output(
-            states,
+        render_source = report_root
+        if report_json_written:
+            render_source = _load_json(report_json_written)
+        report_md, report_out_path = _render_report_output(
+            render_source,
             schema_path=str(args.report_schema),
             report_dir=str(args.report_dir),
             report_out=str(args.report_out),
             mode=mode_label,
-            config=_runtime_config(runtime),
-            trades=trades,
-            tactical_plan=tactical_plan,
             report_meta=report_meta,
-            market_history=_runtime_history(runtime),
         )
-    _strip_persisted_report_transients(states)
     trades_to_save: List[Dict[str, Any]] = []
     for t in trades:
         if isinstance(t, dict):
             trades_to_save.append(_compact_trade_row(t))
     trades_written = _save_trades_payload(trades_to_save, trades_file)
-    meta = states.get('meta')
-    market = states.setdefault('market', {})
-    if isinstance(meta, dict) and not meta:
-        states.pop('meta', None)
-    out_written = _save_json(states, out_path)
+    persisted_states = _compact_persistent_states(states)
+    explicit_out_requested = bool(str(args.out or '').strip())
+    write_primary_state = True
+    if mode_label and (not _has_persistent_state_updates_requested(args)) and (not explicit_out_requested):
+        write_primary_state = False
+        print(f'[INFO] skipped writing primary states file {states_path}: mode-only run writes report snapshots only.')
+    out_written = out_path
+    if write_primary_state:
+        out_written = _save_json(persisted_states, out_path)
     if report_md is not None and report_out_path:
         rp = Path(report_out_path)
         rp.parent.mkdir(parents=True, exist_ok=True)
@@ -1663,5 +1831,6 @@ def _run_main(args: argparse.Namespace) -> int:
     imported_cnt = sum((1 for r in results if r.status == 'imported'))
     skipped_cnt = sum((1 for r in results if r.status == 'skipped_missing'))
     err_cnt = sum((1 for r in results if r.status == 'error'))
-    print(f'[DONE] wrote {out_written} | trades={trades_written} ({len(trades_to_save)} rows) | imported={imported_cnt}, skipped={skipped_cnt}, errors={err_cnt} | keep_history_rows={keep_history_rows}')
+    state_label = out_written if write_primary_state else f'{out_written} (not written)'
+    print(f'[DONE] wrote {state_label} | trades={trades_written} ({len(trades_to_save)} rows) | imported={imported_cnt}, skipped={skipped_cnt}, errors={err_cnt} | keep_history_rows={keep_history_rows}')
     return 0

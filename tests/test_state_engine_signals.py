@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import tempfile
 import unittest
 from datetime import datetime
@@ -8,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from core import state_engine
-from core.models import ReportContext
+from core.models import ReportContext, TacticalPlan
 from core.tactical_engine import compute_tactical_plan
 
 
@@ -570,6 +571,7 @@ class StateEngineModeGateTests(unittest.TestCase):
             render_report=False,
             report_schema="report_spec.json",
             report_dir="report",
+            report_json_out="",
             report_out="",
             log_file="",
             broker_investment_total_usd=None,
@@ -670,6 +672,143 @@ class StateEngineModeGateTests(unittest.TestCase):
 
         joined = "\n".join(messages)
         self.assertIn("forcing mode=Intraday via -f/--force-mode", joined)
+
+    @staticmethod
+    def _reasonable_intraday_context() -> ReportContext:
+        return ReportContext(
+            mode_label="Intraday",
+            mode_key="intraday",
+            session_class="intraday",
+            now_et_iso="2026-03-18T10:30:00-04:00",
+            t_et="2026-03-18",
+            t_plus_1_et="2026-03-19",
+            report_date="2026-03-18",
+            broker_asof_et="2026-03-18",
+            broker_asof_et_datetime="2026-03-18T10:30:00-04:00",
+            snapshot_kind="intraday",
+            reasonable=True,
+            rationale="market is open; intraday uses today as t and the next trading day as t+1.",
+            warning="",
+        )
+
+    def test_compact_persistent_states_keeps_persistent_cash_and_performance_basis(self) -> None:
+        compacted = state_engine._compact_persistent_states(
+            {
+                "market": {"prices_now": {"AAA": 10.0}},
+                "portfolio": {
+                    "positions": [
+                        {"ticker": "AAA", "bucket": "core", "shares": 3, "cost_usd": 30.0},
+                        {"ticker": "BBB", "bucket": "tactical", "shares": 0, "cost_usd": 0.0},
+                    ],
+                    "cash": {
+                        "usd": 11.5,
+                        "deployable_usd": 9.5,
+                        "reserve_usd": 2.0,
+                        "baseline_usd": 100.0,
+                        "net_external_cash_flow_usd": -8.0,
+                        "external_flows": [{"amount_usd": -8.0, "kind": "withdrawal"}],
+                    },
+                    "totals": {"portfolio": {"nav_usd": 41.5}},
+                    "performance": {
+                        "initial_investment_usd": 120.0,
+                        "current_total_assets_usd": 41.5,
+                        "net_external_cash_flow_usd": -8.0,
+                        "effective_capital_base_usd": 112.0,
+                        "profit_usd": -70.5,
+                        "profit_rate": -0.6295,
+                        "baseline": {
+                            "initial_investment_usd": 120.0,
+                            "net_external_cash_flow_usd": -8.0,
+                            "method": "initial_investment_plus_net_external_cash_flow",
+                        },
+                        "returns": {"profit_usd": -70.5},
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            compacted,
+            {
+                "portfolio": {
+                    "positions": [{"ticker": "AAA", "shares": 3}],
+                    "cash": {
+                        "usd": 11.5,
+                        "deployable_usd": 9.5,
+                        "reserve_usd": 2.0,
+                        "baseline_usd": 100.0,
+                        "net_external_cash_flow_usd": -8.0,
+                        "external_flows": [{"amount_usd": -8.0, "kind": "withdrawal"}],
+                    },
+                    "performance": {
+                        "initial_investment_usd": 120.0,
+                        "baseline": {
+                            "initial_investment_usd": 120.0,
+                            "net_external_cash_flow_usd": -8.0,
+                            "method": "initial_investment_plus_net_external_cash_flow",
+                        },
+                    },
+                }
+            },
+        )
+
+    def test_run_main_mode_only_writes_report_json_and_skips_primary_state_without_explicit_out(self) -> None:
+        args = self._mode_args(force_mode=False)
+        args.out = ""
+        args.render_report = True
+        args.now_et = "2026-03-18T10:30:00-04:00"
+        saved_paths: list[str] = []
+
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(state_engine, "_load_json", return_value={"portfolio": {"cash": {"usd": 1.0}, "positions": []}}))
+            stack.enter_context(mock.patch.object(state_engine, "_load_runtime_config", return_value={"numeric_precision": _numeric_precision()}))
+            stack.enter_context(mock.patch.object(state_engine, "_load_trades_payload", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_migrate_state_schema"))
+            stack.enter_context(mock.patch.object(state_engine, "_ensure_trading_calendar"))
+            stack.enter_context(mock.patch.object(state_engine, "_ensure_cash_buckets"))
+            stack.enter_context(mock.patch.object(state_engine, "_resolve_report_context", return_value=self._reasonable_intraday_context()))
+            stack.enter_context(mock.patch.object(state_engine, "_discover_tickers_from_config", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_refresh_csv_history_for_mode_updates", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_compute_keep_history_rows", return_value=1))
+            stack.enter_context(mock.patch.object(state_engine, "_import_csvs_into_states", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_late_hydrate_new_position_tickers", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_rebuild_market_snapshot_from_history"))
+            stack.enter_context(mock.patch.object(state_engine, "_reprice_and_totals"))
+            stack.enter_context(mock.patch.object(state_engine, "compute_tactical_plan", return_value=TacticalPlan()))
+            stack.enter_context(mock.patch.object(state_engine, "_update_portfolio_performance"))
+            stack.enter_context(mock.patch.object(
+                state_engine,
+                "build_report_root",
+                return_value={"portfolio": {"cash": {"usd": 1.0}, "positions": []}, "_report_meta": {"mode": "Intraday", "mode_key": "intraday", "version_anchor_et": "2026-03-18"}},
+            ))
+            stack.enter_context(mock.patch.object(state_engine, "ensure_report_root_fields", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_save_trades_payload", return_value="trades.json"))
+            stack.enter_context(mock.patch.object(state_engine, "_save_json", side_effect=lambda obj, path: saved_paths.append(str(path)) or str(path)))
+            stack.enter_context(mock.patch.object(state_engine, "_render_report_output", return_value=("# Daily Investment Report (Intraday)\n", "report/2026-03-18_intraday.md")))
+            stack.enter_context(mock.patch.object(Path, "write_text", return_value=0))
+            exit_code = state_engine._run_main(args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(saved_paths, ["report/2026-03-18_intraday.json"])
+
+    def test_hydrate_positions_from_trade_ledger_if_needed_rebuilds_minimal_states(self) -> None:
+        states = {"portfolio": {"positions": [{"ticker": "AAA", "shares": 2}], "cash": {"usd": 0.0}}}
+        runtime = {"config": {"numeric_precision": _numeric_precision()}, "history": {}}
+        trades = [
+            {
+                "trade_id": 1,
+                "trade_date_et": "2026-03-10",
+                "time_tw": "2026/03/10 23:00:00",
+                "ticker": "AAA",
+                "side": "BUY",
+                "shares": 2,
+                "cash_amount": 101.0,
+            }
+        ]
+
+        state_engine._hydrate_positions_from_trade_ledger_if_needed(states, runtime, trades)
+
+        self.assertEqual(states["portfolio"]["positions"], [{"ticker": "AAA", "bucket": "tactical", "shares": 2, "cost_usd": 101.0}])
 
 
 if __name__ == "__main__":

@@ -14,12 +14,14 @@ from core.state_engine import (
     _discover_tickers_from_config,
     _ensure_cash_buckets,
     _ensure_trading_calendar,
+    _hydrate_positions_from_trade_ledger_if_needed,
     _import_csvs_into_states,
     _load_trades_payload,
     _load_runtime_config,
     _rebuild_market_snapshot_from_history,
     _reprice_and_totals,
     _resolve_runtime_report_meta,
+    _update_portfolio_performance,
 )
 from utils.logger import configure_logging, emit, log_run_header
 from utils.precision import state_engine_numeric_precision
@@ -62,6 +64,7 @@ def main() -> None:
         _migrate_state_schema(states, ensure_broker_snapshot=True)
         _ensure_trading_calendar(engine_runtime)
         _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+        _hydrate_positions_from_trade_ledger_if_needed(states, engine_runtime, trades)
         report_meta = _resolve_runtime_report_meta(engine_runtime, args.mode, report_date=args.date)
         engine_runtime["report_meta"] = dict(report_meta)
         tickers = _discover_tickers_from_config(states, engine_runtime)
@@ -78,6 +81,7 @@ def main() -> None:
         )
         _rebuild_market_snapshot_from_history(states, engine_runtime)
         _reprice_and_totals(states, engine_runtime)
+        _update_portfolio_performance(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
         tactical_plan = compute_tactical_plan(
             states,
             engine_runtime,

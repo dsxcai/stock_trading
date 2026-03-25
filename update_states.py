@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--render-report", action="store_true", help="Render the markdown report after state updates complete")
     parser.add_argument("--report-schema", default="report_spec.json", help="Schema path used when --render-report is enabled")
     parser.add_argument("--report-dir", default="report", help="Output directory for generated reports")
+    parser.add_argument("--report-json-out", default="", help="Explicit JSON snapshot output path for mode-based report snapshots")
     parser.add_argument("--report-out", default="", help="Explicit report output path")
     parser.add_argument("--log-file", default="", help="Optional run log path")
     parser.add_argument("--broker-investment-total-usd", type=float, default=None, help="Broker investment total excluding cash, in USD")

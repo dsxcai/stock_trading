@@ -230,8 +230,9 @@ That means the state file no longer persists which mode is currently active.
 Trade details are now externalized into `trades.json` by default:
 
 - `config.json` retains strategy configuration, bucket definitions, moving-average rules, trading calendar settings, report document titles, timezone display settings, the external `trades.json` path, and configuration-oriented input source mappings such as `state_engine.csv_sources`
-- `states.json` retains summary outputs and per-mode snapshots, and no longer stores `meta.trades_file` or `meta.trades_count`
+- `states.json` retains compact persistent state such as holdings quantities, cash baselines, external cash-flow history, and performance basis, and no longer stores `meta.trades_file` or `meta.trades_count`
 - `trades.json` retains transaction-level trade records
+- `report/<DATE>_<mode>.json` retains the fully assembled mode-specific report snapshot used to render markdown output
 
 In addition, historical price data is now loaded directly from `data/*.csv` on each execution, rather than storing a long-lived OHLCV block such as `history_400d` inside `states.json`. This includes configured FX pairs such as `state_engine.fx_pairs.usd_twd -> TWD=X`, which are downloaded alongside equity CSVs and can be used for report-only currency analytics.
 
@@ -266,9 +267,11 @@ Likewise, `signals`, `thresholds`, `market.signals_inputs`, and `market.next_clo
 
 `states.json` now primarily retains:
 
-- market snapshot: `market.prices_now`, `market.asof_t_et`
-  `market.prices_now` is rebuilt from loaded CSV history for the tickers that are functionally required by `state_engine` config plus any currently held positions; stale symbols are not retained. This is a market-data rebuild performed during the core update flow, not a rebuild from imported trade HTML/XLS records.
-- portfolio snapshot: `portfolio.positions`, `portfolio.cash`, `portfolio.totals`, `portfolio.performance`
+- current holdings quantities: `portfolio.positions[*].ticker`, `portfolio.positions[*].shares`
+- persistent cash state: `portfolio.cash.usd`, `portfolio.cash.deployable_usd`, `portfolio.cash.reserve_usd`, `portfolio.cash.baseline_usd`, external cash-flow history, and related reconciliation metadata
+- persistent performance basis: `portfolio.performance.initial_investment_usd` and `portfolio.performance.baseline.*`
+
+Derived fields such as market prices, totals, signals, thresholds, and per-mode report content are not persisted in `states.json`. Runtime performance outputs such as current total assets and profit are recomputed from the persistent basis plus the latest `trades.json` and `data/*.csv`, then written into `report/<DATE>_<mode>.json` for each mode run.
 
 ### 5.3 Why all reports now require an explicit `--mode`
 
@@ -294,6 +297,7 @@ The report will then derive the corresponding runtime context directly rather th
 
 Purpose: update the state before market open and generate the premarket report.
 Current-position USD prices and signal inputs stay on the prior NYSE close. `Unrealized PnL (TWD)` still uses the latest available USD/TWD CSV quote and the report marks that as `Estimated Price`.
+This entry point does not rewrite the primary `states.json`. It writes `report/<DATE>_premarket.json` and renders the markdown report from that snapshot.
 
 ### 6.2 Intraday
 
@@ -303,6 +307,7 @@ Current-position USD prices and signal inputs stay on the prior NYSE close. `Unr
 
 Purpose: update the state during market hours and generate the intraday report.
 If a same-day CSV row is available, `Current Positions` and `Signal Status` use that same-day price in Intraday mode, and the report marks it as `Estimated Price`.
+This entry point does not rewrite the primary `states.json`. It writes `report/<DATE>_intraday.json` and renders the markdown report from that snapshot.
 
 ### 6.3 AfterClose
 
@@ -311,6 +316,7 @@ If a same-day CSV row is available, `Current Positions` and `Signal Status` use 
 ```
 
 Purpose: update the state after market close and generate the after-close report.
+This entry point does not rewrite the primary `states.json`. It writes `report/<DATE>_afterclose.json` and renders the markdown report from that snapshot.
 
 ### 6.4 Capital XLS extension import
 
@@ -337,6 +343,7 @@ Purpose: use an existing snapshot together with `data/*.csv` to compute the tact
 
 This command must explicitly include `--mode`.
 When `update_states.py` is run with `--mode`, it now attempts an automatic CSV refresh first. The refresh scope is limited to functionally active tickers: current holdings, strategy tickers, and configured FX pairs such as `TWD=X`. The mode update flow refreshes those active tickers every time instead of trusting the last CSV row to already be a finalized close.
+If the input `states.json` is compact, the command reconstructs derived position fields such as bucket and FIFO cost basis from `trades.json` before loading CSV market data.
 If a downloaded or local CSV row has incomplete OHLC values, the command fails by default. Use `--allow-incomplete-csv-rows` only when you intentionally want to bypass that failure and skip incomplete rows.
 
 ### 6.6 Tactical simulation / backtest
@@ -519,6 +526,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | `--out`           | Specify the output state file                                |
 | `--csv-dir`       | Specify the market price CSV directory; defaults to `./data` if omitted |
 | `--allow-incomplete-csv-rows` | Bypass incomplete OHLC rows by skipping them instead of failing |
+| `--report-json-out` | Explicitly specify the mode snapshot JSON path; default is `report/<DATE>_<mode>.json` |
 | `--report-schema` | Specify the report schema                                    |
 | `--report-dir`    | Specify the report output directory                          |
 | `--report-out`    | Directly specify the report output filename                  |
@@ -561,6 +569,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 Imported trade rounding is controlled by `config.json` under `state_engine.numeric_precision`. In practice, `trade_cash_amount` controls stored `cash_amount` values and `trade_dedupe_amount` controls the numeric precision used by trade deduplication keys.
 
 After imported trades are merged, `portfolio.positions` is rebuilt from the full trade ledger. Remaining position cost basis follows FIFO. This trade-ledger rebuild applies to holdings only; `market.prices_now` is rebuilt separately from loaded CSV history.
+When `states.json` is saved, holdings are persisted as share quantities while cash baselines, external cash-flow history, and performance basis are also preserved; derived FIFO cost basis is reconstructed again on the next runtime from `trades.json`.
 Current-position notes shown in reports are derived from the surviving FIFO lots behind each holding, aggregating the unique non-empty trade notes that still compose the remaining shares and appending the remaining share count for each note, such as `AA x2 | BB x7`. They are not persisted in `portfolio.positions`.
 The `Current Positions` table also includes `Unrealized PnL (TWD)` and `Unrealized PnL % (TWD)`. They are computed only at report-build time by converting each surviving FIFO buy lot with the USD/TWD close on or before its buy date, then comparing that TWD cost basis with the current position market value translated by the latest available USD/TWD CSV quote. In Premarket mode the report marks that FX translation as `Estimated Price` whenever the FX quote is newer than the prior-close signal basis day.
 

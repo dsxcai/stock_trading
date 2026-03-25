@@ -4,7 +4,6 @@ cd "$ROOT_DIR" || exit 1
 
 python3 update_states.py \
   --states states.json \
-  --out states.json \
   --csv-dir data \
   --derive-signals-inputs force \
   --derive-threshold-inputs force \

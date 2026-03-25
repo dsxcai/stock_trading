@@ -236,8 +236,8 @@ class RegressionPipelineTests(unittest.TestCase):
                 check=True,
             )
 
-            out_states = json.loads((workdir / "out_states.json").read_text(encoding="utf-8"))
-            prices_now = ((out_states.get("market") or {}).get("prices_now") or {})
+            report_snapshot = json.loads((workdir / "report" / "2026-03-18_premarket.json").read_text(encoding="utf-8"))
+            prices_now = ((report_snapshot.get("market") or {}).get("prices_now") or {})
             self.assertEqual(set(prices_now), {"ARKQ", "GOOG", "META", "NVDA", "SMH", "SPY", "TWD=X"})
 
     def test_force_mode_allows_session_mismatch(self) -> None:
@@ -288,7 +288,7 @@ class RegressionPipelineTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(forced.returncode, 0, forced.stdout)
-            self.assertIn("forcing mode=Intraday despite ET/session mismatch", forced.stdout)
+            self.assertIn("forcing mode=Intraday via -f/--force-mode despite ET/session mismatch", forced.stdout)
             self.assertTrue((workdir / "forced_intraday_states.json").exists())
             self.assertTrue((workdir / "forced_intraday_report.md").exists())
             self.assertIn(
