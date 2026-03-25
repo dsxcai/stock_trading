@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Optional
 
 from core.models import TacticalPlan
+from core.report_meta import _normalize_mode_key
+from core.reconciliation import _trade_buy_total_cost_usd
 
 
 def _trade_note_sort_key(trade: Dict[str, Any]) -> tuple[str, str, int]:
@@ -17,22 +18,6 @@ def _trade_note_sort_key(trade: Dict[str, Any]) -> tuple[str, str, int]:
         str(trade.get("time_tw") or "").strip(),
         trade_id_int,
     )
-
-
-def _trade_buy_total_cost_usd(trade: Dict[str, Any]) -> Optional[float]:
-    for key in ("cash_amount", "amount"):
-        value = trade.get(key)
-        try:
-            if value is not None:
-                return float(value)
-        except Exception:
-            continue
-    try:
-        return float(trade.get("gross") or 0.0) + float(trade.get("fee") or 0.0)
-    except Exception:
-        return None
-
-
 def _open_lots_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     lots_by_ticker: Dict[str, List[Dict[str, Any]]] = {}
     for trade in sorted(trades, key=_trade_note_sort_key):
@@ -103,12 +88,6 @@ def _usd_twd_fx_ticker(config: Optional[Dict[str, Any]]) -> str:
     if not isinstance(usd_twd_cfg, dict):
         return ""
     return str(usd_twd_cfg.get("ticker") or "").upper().strip()
-
-
-def _normalize_mode_key(mode: Any) -> str:
-    return re.sub(r"[\s_\-]+", "", str(mode or "").strip().lower())
-
-
 def _signal_basis_day(report_meta: Optional[Dict[str, Any]]) -> str:
     if not isinstance(report_meta, dict):
         return ""

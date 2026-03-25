@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from core.report_meta import _effective_report_meta, _migrate_state_schema, _normalize_mode_key
+
 def _extract_json_from_text(txt: str) -> Dict[str, Any]:
     s = txt.strip()
     if s.startswith('```'):
@@ -330,71 +332,8 @@ def render_grouped_trade_table(table_spec: Dict[str, Any], rows: List[Dict[str, 
         md_parts.append('')
     return '\n'.join(md_parts).rstrip() + '\n'
 
-def _normalize_mode_key(mode: Any) -> str:
-    return re.sub('[\\s_\\-]+', '', str(mode or '').strip().lower())
-
-def _get_mode_snapshot(states: Dict[str, Any], mode: Any) -> Dict[str, Any]:
-    mode_label = str(mode or '').strip()
-    mode_key = _normalize_mode_key(mode_label)
-    if not mode_key:
-        return {}
-    store = states.get('by_mode')
-    if not isinstance(store, dict):
-        return {}
-    snap = store.get(mode_key)
-    if not isinstance(snap, dict):
-        return {}
-    out = dict(snap)
-    out.setdefault('mode', mode_label or out.get('mode') or mode_key)
-    out.setdefault('mode_key', mode_key)
-    return out
-
-def _migrate_state_schema(states: Dict[str, Any]) -> None:
-    states.setdefault('meta', {})
-    store = states.get('by_mode')
-    if isinstance(store, dict):
-        for snap in store.values():
-            if isinstance(snap, dict):
-                snap.pop('report_context', None)
-                snap.pop('broker_context', None)
-    portfolio = states.setdefault('portfolio', {})
-    broker = portfolio.setdefault('broker', {})
-    broker.setdefault('snapshot', {})
-
-def _transient_report_meta(states: Dict[str, Any], mode: Any) -> Dict[str, Any]:
-    meta = states.get('_report_meta')
-    if not isinstance(meta, dict):
-        return {}
-    mode_key = _normalize_mode_key(mode)
-    meta_mode_key = _normalize_mode_key(meta.get('mode_key') or meta.get('mode'))
-    if meta_mode_key and mode_key and meta_mode_key != mode_key:
-        return {}
-    out = dict(meta)
-    if mode_key:
-        out.setdefault('mode_key', mode_key)
-    if str(mode or '').strip():
-        out.setdefault('mode', str(mode).strip())
-    return out
-
-def _effective_meta(states: Dict[str, Any], mode: Any) -> Dict[str, Any]:
-    eff = dict(states.get('meta', {}) or {})
-    transient = _transient_report_meta(states, mode)
-    if transient:
-        for k in ('signal_basis', 'execution_basis', 'version_anchor_et', 'version', 'price_notes'):
-            if k in transient:
-                eff[k] = transient.get(k)
-        eff['mode'] = transient.get('mode') or str(mode or '').strip()
-        return eff
-    snap = _get_mode_snapshot(states, mode)
-    if snap:
-        for k in ('signal_basis', 'execution_basis', 'version_anchor_et', 'version', 'price_notes'):
-            if k in snap:
-                eff[k] = snap.get(k)
-        eff['mode'] = snap.get('mode') or str(mode or '').strip()
-    return eff
-
 def report_title_from_meta(states: Dict[str, Any], mode: str) -> str:
-    meta = _effective_meta(states, mode)
+    meta = _effective_report_meta(states, mode)
     cfg = states.get('config', {}) or {}
     doc = cfg.get('doc') or meta.get('doc') or 'Daily Investment Report'
     if isinstance(doc, str) and '|' in doc:
@@ -403,7 +342,7 @@ def report_title_from_meta(states: Dict[str, Any], mode: str) -> str:
     return f'{doc} ({mode_label})' if mode_label else str(doc)
 
 def report_date_default(states: Dict[str, Any], mode: str) -> str:
-    meta = _effective_meta(states, mode)
+    meta = _effective_report_meta(states, mode)
     d = meta.get('version_anchor_et')
     if d:
         dd = _parse_dateish(str(d))
@@ -419,7 +358,7 @@ def report_date_default(states: Dict[str, Any], mode: str) -> str:
 
 def render_report(states: Dict[str, Any], schema: Dict[str, Any], mode: str) -> str:
     null_display = (schema.get('output') or {}).get('null_display') or '-'
-    meta = _effective_meta(states, mode)
+    meta = _effective_report_meta(states, mode)
     if not any((
         meta.get('version_anchor_et'),
         meta.get('signal_basis'),

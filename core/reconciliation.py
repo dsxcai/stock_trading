@@ -41,6 +41,21 @@ def _trade_key(trade: Dict[str, Any], amount_ndigits: int) -> str:
     )
 
 
+def _trade_buy_total_cost_usd(trade: Dict[str, Any]) -> Optional[float]:
+    """Return the all-in buy cost using the normalized trade cash fields when present."""
+    for key in ("cash_amount", "amount"):
+        value = trade.get(key)
+        try:
+            if value is not None:
+                return float(value)
+        except Exception:
+            continue
+    try:
+        return float(trade.get("gross") or 0.0) + float(trade.get("fee") or 0.0)
+    except Exception:
+        return None
+
+
 def _normalize_trades_inplace(trades: List[Dict[str, Any]], cash_amount_ndigits: int) -> None:
     """Normalize existing trades in-place for stable downstream reconciliation."""
     if not isinstance(trades, list):

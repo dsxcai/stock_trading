@@ -1,7 +1,7 @@
 # Daily Investment Report (Premarket)
 - Signal Basis: t=2026-03-17 (NYSE Close)
 - Execution Basis: t+1=2026-03-18 (NYSE Trading Day)
-- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24.
+- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-25.
 
 ## Performance Summary
 | Item | Value |

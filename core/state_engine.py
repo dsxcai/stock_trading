@@ -11,10 +11,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.models import ImportResult, ReportContext
 from core.report_bundle import build_report_root, ensure_report_root_fields
+from core.report_meta import _effective_report_meta, _migrate_state_schema, _normalize_mode_key
 from core.reconciliation import (
     _first_token_ticker,
     _normalize_trades_inplace,
     _num_from_cell,
+    _trade_buy_total_cost_usd,
     _trade_key,
     _upsert_trades,
     _verify_holdings_with_broker_investment_total,
@@ -53,11 +55,6 @@ def _load_runtime_config(path: str) -> Dict[str, Any]:
         raise KeyError(f"config.json must contain object key 'state_engine': {path}")
     return dict(scoped)
 
-def _runtime_config_value(states: Dict[str, Any], key: str, default: Any=None) -> Any:
-    cfg = states.get('config', {}) or {}
-    value = cfg.get(key, default)
-    return default if value is None else value
-
 def _runtime_config(runtime: Dict[str, Any]) -> Dict[str, Any]:
     cfg = runtime.get('config') or {}
     return cfg if isinstance(cfg, dict) else {}
@@ -76,10 +73,6 @@ def _runtime_history(runtime: Dict[str, Any]) -> Dict[str, Any]:
 def _runtime_report_meta(runtime: Dict[str, Any]) -> Dict[str, Any]:
     meta = runtime.get('report_meta')
     return dict(meta) if isinstance(meta, dict) else {}
-
-def _runtime_mode_key(runtime: Dict[str, Any]) -> str:
-    meta = _runtime_report_meta(runtime)
-    return _normalize_mode_key(meta.get('mode_key') or meta.get('mode'))
 
 def _runtime_signal_basis_day(runtime: Dict[str, Any]) -> Optional[str]:
     meta = _runtime_report_meta(runtime)
@@ -396,55 +389,6 @@ def _resolve_report_context(states: Dict[str, Any], runtime: Dict[str, Any], mod
         return ReportContext(mode_label, mode_key, session, now_iso, today.isoformat(), t1, today.isoformat(), today.isoformat(), '', 'eod', False, 'afterclose requires a completed session close for t.', "current ET session is intraday, so today's close is not finalized yet.")
     raise ValueError(f'unsupported mode: {mode_label}')
 
-def _get_mode_snapshot(states: Dict[str, Any], mode: Any) -> Dict[str, Any]:
-    mode_label = str(mode or '').strip()
-    mode_key = _normalize_mode_key(mode_label)
-    if not mode_key:
-        return {}
-    store = states.get('by_mode')
-    if not isinstance(store, dict):
-        return {}
-    snap = store.get(mode_key)
-    if not isinstance(snap, dict):
-        return {}
-    out = dict(snap)
-    out.setdefault('mode', mode_label or out.get('mode') or mode_key)
-    out.setdefault('mode_key', mode_key)
-    return out
-
-def _snapshot_effective_meta(states: Dict[str, Any], mode: Any) -> Dict[str, Any]:
-    eff = dict(states.get('meta') or {})
-    snap = _get_mode_snapshot(states, mode)
-    if snap:
-        for k in ('signal_basis', 'execution_basis', 'version_anchor_et', 'version'):
-            if k in snap:
-                eff[k] = snap.get(k)
-        eff['mode'] = snap.get('mode') or str(mode or '').strip()
-    return eff
-
-def _iter_mode_candidate_days(states: Dict[str, Any]) -> List[str]:
-    out: List[str] = []
-    store = states.get('by_mode') or {}
-    if not isinstance(store, dict):
-        return out
-    for snap in store.values():
-        if not isinstance(snap, dict):
-            continue
-        for v in (snap.get('version_anchor_et'), (snap.get('signal_basis') or {}).get('t_et'), (snap.get('execution_basis') or {}).get('t_plus_1_et')):
-            if isinstance(v, str) and re.fullmatch('\\d{4}-\\d{2}-\\d{2}', v):
-                out.append(v)
-    return out
-
-def _migrate_state_schema(states: Dict[str, Any]) -> None:
-    states.setdefault('meta', {})
-    store = states.get('by_mode')
-    if isinstance(store, dict):
-        for snap in store.values():
-            if isinstance(snap, dict):
-                snap.pop('report_context', None)
-                snap.pop('broker_context', None)
-    states.setdefault('portfolio', {})
-
 def _report_meta_from_mode_dates(mode_label: str, t_et: str, t_plus_1_et: Optional[str]) -> Dict[str, Any]:
     mode_key = _normalize_mode_key(mode_label)
     version_anchor_et = _version_anchor_day_et(mode_label, t_et, t_plus_1_et)
@@ -537,7 +481,7 @@ def _build_report_output(
     md = _render_report_markdown(report_root, schema, mode)
     meta = dict(report_meta or {})
     if not meta:
-        meta = _snapshot_effective_meta(states, mode)
+        meta = _effective_report_meta(states, mode)
     report_date = _report_date_from_meta(meta)
     if not report_date:
         report_date = datetime.now().strftime('%Y-%m-%d')
@@ -547,9 +491,6 @@ def _build_report_output(
     else:
         out_path = str(Path(report_dir) / f'{report_date}_{mode_key}.md')
     return (md, out_path)
-
-def _normalize_mode_key(mode: Any) -> str:
-    return re.sub('[\\s_\\-]+', '', str(mode or '').strip().lower())
 
 def _version_anchor_day_et(mode: Any, t_et: str, t_plus_1_et: Optional[str]) -> Optional[str]:
     m = _normalize_mode_key(mode)
@@ -583,10 +524,6 @@ def _parse_broker_asof(states: Dict[str, Any], broker_asof_et: str, broker_asof_
     else:
         snapshot_kind = 'unknown'
     return (broker_asof_et or None, None, snapshot_kind)
-    if broker_asof_et:
-        d = _to_yyyy_mm_dd(broker_asof_et)
-        return (d, None, 'eod')
-    return (None, None, 'unknown')
 
 def _market_history_rows_map(runtime: Dict[str, Any]) -> Dict[str, Any]:
     return _runtime_history(runtime)
@@ -702,37 +639,6 @@ def _lookup_action_price_usd(states: Dict[str, Any], runtime: Dict[str, Any], ti
             except Exception:
                 return None
     return None
-
-def _current_signal_day_et(states: Dict[str, Any], runtime: Dict[str, Any], mode: Optional[str]=None) -> Optional[str]:
-    candidates: List[Any] = []
-    runtime_signal_day = _runtime_signal_basis_day(runtime)
-    if runtime_signal_day:
-        candidates.append(runtime_signal_day)
-    if mode:
-        snap = _get_mode_snapshot(states, mode)
-        if snap:
-            candidates.extend([(snap.get('signal_basis') or {}).get('t_et'), snap.get('version_anchor_et')])
-    candidates.extend(_iter_mode_candidate_days(states))
-    candidates.append((states.get('market') or {}).get('asof_t_et'))
-    for cand in candidates:
-        s = str(cand or '').strip()
-        if s:
-            try:
-                return _to_yyyy_mm_dd(s)
-            except Exception:
-                pass
-    return None
-
-def _update_signals_and_thresholds(states: Dict[str, Any], runtime: Dict[str, Any], derive_signals_inputs: str, derive_threshold_inputs: str, mode: Optional[str]=None, trades: Optional[List[Dict[str, Any]]]=None) -> None:
-    plan = compute_tactical_plan(
-        states,
-        runtime,
-        derive_signals_inputs=derive_signals_inputs,
-        derive_threshold_inputs=derive_threshold_inputs,
-        mode=mode,
-        trades=trades,
-    )
-    apply_tactical_plan(states, plan)
 
 def _discover_tickers_from_config(states: Dict[str, Any], runtime: Dict[str, Any]) -> List[str]:
     cfg = _runtime_config(runtime)
@@ -1294,15 +1200,6 @@ def _prune_zero_share_positions(states: Dict[str, Any]) -> None:
     if removed > 0:
         print(f'[PORTFOLIO] pruned {removed} zero-share position(s).')
 
-def _trade_buy_total_cost_usd(t: Dict[str, Any]) -> float:
-    try:
-        cash_amount = t.get('cash_amount')
-        if cash_amount is not None:
-            return float(cash_amount)
-    except Exception:
-        pass
-    return float(t.get('gross') or 0.0) + float(t.get('fee') or 0.0)
-
 def _fifo_lots_from_position(pos: Dict[str, Any]) -> List[Dict[str, float]]:
     try:
         shares = int(float(pos.get('shares') or 0))
@@ -1485,47 +1382,6 @@ def _update_tactical_cash_from_trades_and_snapshot(states: Dict[str, Any], trade
         cut = f', cutoff_et={cutoff_et_dt.isoformat()}' if cutoff_et_dt is not None else ''
         print(f"[INFO] tactical cash.usd derived from trades: cash_usd={format_fixed(cash_from_baseline, usd_amount_ndigits)} (baseline_usd={format_fixed(baseline, usd_amount_ndigits)}, net_cash_change={format_fixed(net_cash_change, usd_amount_ndigits)}{cut})")
 
-def _ensure_report_fields(states: Dict[str, Any]) -> List[str]:
-    return ensure_report_root_fields(states)
-
-def _close_from_history_asof(runtime: Dict[str, Any], ticker: str, asof_et: Optional[str]) -> Tuple[Optional[str], Optional[float]]:
-    hist = (_market_history_rows_map(runtime).get(ticker) or {})
-    rows = hist.get('rows') or []
-    if not rows:
-        return (None, None)
-    if not asof_et:
-        r = rows[-1]
-        return (str(r.get('Date') or ''), _safe_float(r.get('Close')))
-    asof_d = _parse_ymd_loose(asof_et)
-    if not asof_d:
-        r = rows[-1]
-        return (str(r.get('Date') or ''), _safe_float(r.get('Close')))
-    chosen = None
-    for r in rows:
-        rd = _parse_ymd_loose(str(r.get('Date') or ''))
-        if rd and rd <= asof_d:
-            chosen = r
-        elif rd and rd > asof_d:
-            break
-    if chosen is None:
-        chosen = rows[0]
-    return (str(chosen.get('Date') or ''), _safe_float(chosen.get('Close')))
-
-def _position_price_used(states: Dict[str, Any], runtime: Dict[str, Any], pos: Dict[str, Any], ticker: str) -> Tuple[Optional[float], str]:
-    if pos.get('price_now') is not None:
-        return (_safe_float(pos.get('price_now')), 'position.price_now')
-    pn = ((states.get('market') or {}).get('prices_now') or {}).get(ticker)
-    if pn is not None:
-        try:
-            return (float(pn), 'market.prices_now')
-        except Exception:
-            pass
-    d, c = _close_from_history_asof(runtime, ticker, None)
-    if c is not None:
-        return (c, f'history.last_close({d})')
-    return (None, 'missing')
-
-
 def _mode_required_operations_requested(args: argparse.Namespace) -> bool:
     return bool(str(args.tickers or '').strip() or bool(getattr(args, 'render_report', False)) or getattr(args, 'broker_investment_total_usd', None) is not None or (getattr(args, 'tactical_cash_usd', None) is not None))
 
@@ -1605,13 +1461,7 @@ def _run_main(args: argparse.Namespace) -> int:
         p = Path(states_path)
         out_path = str(p.with_name(f'{p.stem}.updated.json'))
     results = _import_csvs_into_states(states, runtime, csv_dir=args.csv_dir, tickers=tickers, prices_now_from=args.prices_now_from, keep_history_rows=keep_history_rows)
-    imported = [r for r in results if r.status == 'imported']
-    skipped = [r for r in results if r.status == 'skipped_missing']
-    errors = [r for r in results if r.status == 'error']
-    last_dates = sorted({str(r.last_date) for r in imported if r.last_date})
-    csv_asof = last_dates[-1] if last_dates else '-'
     processed_tickers = list(tickers)
-    trade_import_runs: List[Dict[str, Any]] = []
     _normalize_trades_inplace(trades, cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]))
     if args.imported_trades_json:
         for import_path in args.imported_trades_json:
@@ -1637,18 +1487,9 @@ def _run_main(args: argparse.Namespace) -> int:
                 else:
                     portfolio_delta_desc = '0'
                     print(f'[PORTFOLIO] {mode}: no trade ledger changes; skipped portfolio rebuild.')
-                trade_import_runs.append({'file': import_label, 'status': 'ok', 'parsed': len(incoming), 'added': added, 'dup': dup, 'mode': mode})
                 print(f'[OK] trades import {import_label}: parsed={len(incoming)}, added={added}, dup={dup}, mode={mode}, portfolio_delta={portfolio_delta_desc}')
             except Exception as e:
-                trade_import_runs.append({'file': Path(import_path).name, 'status': 'error', 'error': str(e)})
                 print(f'[ERR] trades import failed for {import_path}: {e}')
-    if trade_import_runs:
-        trade_import_ok = [x for x in trade_import_runs if str(x.get('status') or '') == 'ok']
-        trade_import_err = [x for x in trade_import_runs if str(x.get('status') or '') != 'ok']
-        trade_import_parsed = sum(int(x.get('parsed') or 0) for x in trade_import_ok)
-        trade_import_added = sum(int(x.get('added') or 0) for x in trade_import_ok)
-        trade_import_dup = sum(int(x.get('dup') or 0) for x in trade_import_ok)
-        trade_import_mode = str(trade_import_ok[-1].get('mode') or '-') if trade_import_ok else '-'
     late_results = _late_hydrate_new_position_tickers(states, runtime, csv_dir=args.csv_dir, prices_now_from=args.prices_now_from, keep_history_rows=keep_history_rows, already_processed=processed_tickers)
     if late_results:
         results.extend(late_results)
@@ -1721,7 +1562,7 @@ def _run_main(args: argparse.Namespace) -> int:
         market_history=_runtime_history(runtime),
     )
     if mode_label:
-        warns = _ensure_report_fields(report_root)
+        warns = ensure_report_root_fields(report_root)
         if warns:
             print('[WARN] Some report fields look missing/incomplete:')
             for w in warns:

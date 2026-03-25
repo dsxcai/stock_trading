@@ -6,26 +6,23 @@ import traceback
 from pathlib import Path
 
 from core import reporting as runtime
+from core.report_meta import _migrate_state_schema, _normalize_mode_key
 from core.tactical_engine import compute_tactical_plan
-from core.report_bundle import build_report_root
 from core.state_engine import (
+    _build_report_output,
     _compute_keep_history_rows,
     _discover_tickers_from_config,
     _ensure_cash_buckets,
     _ensure_trading_calendar,
     _import_csvs_into_states,
+    _load_trades_payload,
     _load_runtime_config,
     _rebuild_market_snapshot_from_history,
     _reprice_and_totals,
-    _report_date_from_meta,
     _resolve_runtime_report_meta,
 )
 from utils.logger import configure_logging, emit, log_run_header
 from utils.precision import state_engine_numeric_precision
-
-load_schema = runtime.load_schema
-render_report = runtime.render_report
-report_date_default = runtime.report_date_default
 
 
 def main() -> None:
@@ -59,14 +56,9 @@ def main() -> None:
         trades_path = Path(trades_file)
         if not trades_path.is_absolute():
             trades_path = Path(args.states).resolve().parent / trades_path
-        trades = []
-        if trades_path.exists():
-            loaded = json.loads(trades_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, list):
-                trades = loaded
-            elif isinstance(loaded, dict) and isinstance(loaded.get("trades"), list):
-                trades = loaded.get("trades") or []
-        runtime._migrate_state_schema(states)
+        loaded_trades = _load_trades_payload(str(trades_path))
+        trades = loaded_trades if isinstance(loaded_trades, list) else []
+        _migrate_state_schema(states, ensure_broker_snapshot=True)
         _ensure_trading_calendar(engine_runtime)
         _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
         report_meta = _resolve_runtime_report_meta(engine_runtime, args.mode, report_date=args.date)
@@ -92,18 +84,21 @@ def main() -> None:
             mode=args.mode,
             trades=trades,
         )
-        schema = load_schema(args.schema)
-        report_date = args.date.strip() or _report_date_from_meta(report_meta) or report_date_default(states, args.mode)
-        output_path = args.out.strip() or str(Path(args.out_dir) / f"{report_date}_{runtime._normalize_mode_key(args.mode)}.md")
-        report_root = build_report_root(
+        markdown, output_path = _build_report_output(
             states,
+            schema_path=args.schema,
+            report_dir=args.out_dir,
+            report_out=args.out.strip(),
+            mode=args.mode,
             config=config,
             trades=trades,
             tactical_plan=tactical_plan,
             report_meta=report_meta,
             market_history=engine_runtime.get("history"),
         )
-        markdown = render_report(report_root, schema, args.mode)
+        if not args.out.strip() and args.date.strip():
+            report_date = args.date.strip()
+            output_path = str(Path(args.out_dir) / f"{report_date}_{_normalize_mode_key(args.mode)}.md")
         Path(output_path).write_text(markdown, encoding="utf-8")
         logger.info(f"[OK] wrote {output_path}")
         logger.info("[EXIT] code=0")

@@ -40,7 +40,7 @@ class StateEngineSignalTests(unittest.TestCase):
     def _run_signal_update(states: dict) -> None:
         runtime = {"config": dict(states.get("config") or {}), "history": {}}
         state_engine._ensure_trading_calendar(runtime)
-        state_engine._update_signals_and_thresholds(
+        plan = compute_tactical_plan(
             states,
             runtime,
             derive_signals_inputs="never",
@@ -48,6 +48,7 @@ class StateEngineSignalTests(unittest.TestCase):
             mode="Premarket",
             trades=list(states.get("trades") or []),
         )
+        state_engine.apply_tactical_plan(states, plan)
 
     def test_sell_signal_with_recent_buy_executes_sell_all(self) -> None:
         states = {
