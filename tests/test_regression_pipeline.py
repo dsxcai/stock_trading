@@ -13,34 +13,104 @@ from utils.precision import load_state_engine_numeric_precision
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
+FIXTURE_MARKET_DATA_DIR = FIXTURES_DIR / "market_data"
+FIXTURE_STATES = FIXTURES_DIR / "golden_premarket_states.json"
+FIXTURE_TRADES = FIXTURES_DIR / "golden_premarket_trades.json"
 FIXED_NOW_ET = "2026-03-18T08:00:00-04:00"
-PROJECT_ITEMS = [
+PROJECT_CORE_ITEMS = [
     "config.json",
     "report_spec.json",
-    "states.json",
-    "trades.json",
     "update_states.py",
     "generate_report.py",
     "download_1y.py",
     "core",
     "utils",
-    "data",
 ]
 
 
-def _copy_project(dst: Path) -> None:
-    for name in PROJECT_ITEMS:
+def _copy_project(
+    dst: Path,
+    *,
+    states_src: Path,
+    trades_src: Path,
+    data_src: Path,
+) -> None:
+    for name in PROJECT_CORE_ITEMS:
         src = REPO_ROOT / name
         target = dst / name
         if not src.exists():
-            if name == "data":
-                target.mkdir(parents=True, exist_ok=True)
-                continue
             raise FileNotFoundError(src)
         if src.is_dir():
             shutil.copytree(src, target)
         else:
             shutil.copy2(src, target)
+    shutil.copy2(states_src, dst / "states.json")
+    shutil.copy2(trades_src, dst / "trades.json")
+    shutil.copytree(data_src, dst / "data")
+
+
+def _expected_active_tickers(config_path: Path, states_path: Path) -> set[str]:
+    cfg = json.loads(config_path.read_text(encoding="utf-8")).get("state_engine") or {}
+    states = json.loads(states_path.read_text(encoding="utf-8"))
+    expected: list[str] = []
+    seen: set[str] = set()
+
+    def add(ticker: object) -> None:
+        ticker_norm = str(ticker or "").upper().strip()
+        if ticker_norm and ticker_norm not in seen:
+            seen.add(ticker_norm)
+            expected.append(ticker_norm)
+
+    buckets = cfg.get("buckets") or {}
+    for ticker in ((buckets.get("core") or {}).get("tickers") or []):
+        add(ticker)
+    tactical_bucket = buckets.get("tactical") or {}
+    for ticker in (tactical_bucket.get("tickers") or []):
+        add(ticker)
+    add(tactical_bucket.get("cash_pool_ticker"))
+    for ticker in (((buckets.get("tactical_cash_pool") or {}).get("tickers")) or []):
+        add(ticker)
+    for ticker in (cfg.get("tactical_indicators") or {}).keys():
+        add(ticker)
+    for fx_cfg in (cfg.get("fx_pairs") or {}).values():
+        if isinstance(fx_cfg, dict):
+            add(fx_cfg.get("ticker"))
+    for position in (((states.get("portfolio") or {}).get("positions")) or []):
+        if isinstance(position, dict):
+            add(position.get("ticker"))
+    return set(expected)
+
+
+def _run_premarket_update(workdir: Path, *, states_name: str = "states.json", out_states: str = "out_states.json", out_report: str = "out_report.md") -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            "update_states.py",
+            "--states",
+            states_name,
+            "--out",
+            out_states,
+            "--csv-dir",
+            "data",
+            "--derive-signals-inputs",
+            "force",
+            "--derive-threshold-inputs",
+            "force",
+            "--mode",
+            "Premarket",
+            "--render-report",
+            "--report-schema",
+            "report_spec.json",
+            "--report-out",
+            out_report,
+            "--now-et",
+            FIXED_NOW_ET,
+        ],
+        cwd=workdir,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=True,
+    )
 
 
 class RegressionPipelineTests(unittest.TestCase):
@@ -79,36 +149,13 @@ class RegressionPipelineTests(unittest.TestCase):
     def test_premarket_pipeline_matches_golden_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
-            _copy_project(workdir)
-            subprocess.run(
-                [
-                    sys.executable,
-                    "update_states.py",
-                    "--states",
-                    "states.json",
-                    "--out",
-                    "out_states.json",
-                    "--csv-dir",
-                    "data",
-                    "--derive-signals-inputs",
-                    "force",
-                    "--derive-threshold-inputs",
-                    "force",
-                    "--mode",
-                    "Premarket",
-                    "--render-report",
-                    "--report-schema",
-                    "report_spec.json",
-                    "--report-out",
-                    "out_report.md",
-                    "--now-et",
-                    FIXED_NOW_ET,
-                ],
-                cwd=workdir,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True,
+            _copy_project(
+                workdir,
+                states_src=FIXTURE_STATES,
+                trades_src=FIXTURE_TRADES,
+                data_src=FIXTURE_MARKET_DATA_DIR,
             )
+            _run_premarket_update(workdir)
             actual_states = (workdir / "out_states.json").read_text(encoding="utf-8")
             actual_report = (workdir / "out_report.md").read_text(encoding="utf-8")
             expected_states = (FIXTURES_DIR / "golden_premarket_states.json").read_text(encoding="utf-8")
@@ -121,15 +168,18 @@ class RegressionPipelineTests(unittest.TestCase):
     def test_generate_report_matches_golden_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
-            _copy_project(workdir)
-            shutil.copy2(FIXTURES_DIR / "golden_premarket_states.json", workdir / "golden_states.json")
-            shutil.copy2(FIXTURES_DIR / "golden_premarket_trades.json", workdir / "trades.json")
+            _copy_project(
+                workdir,
+                states_src=FIXTURE_STATES,
+                trades_src=FIXTURE_TRADES,
+                data_src=FIXTURE_MARKET_DATA_DIR,
+            )
             subprocess.run(
                 [
                     sys.executable,
                     "generate_report.py",
                     "--states",
-                    "golden_states.json",
+                    "states.json",
                     "--trades-file",
                     "trades.json",
                     "--schema",
@@ -153,36 +203,13 @@ class RegressionPipelineTests(unittest.TestCase):
     def test_premarket_pipeline_keeps_position_notes_out_of_states(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
-            _copy_project(workdir)
-            subprocess.run(
-                [
-                    sys.executable,
-                    "update_states.py",
-                    "--states",
-                    "states.json",
-                    "--out",
-                    "out_states.json",
-                    "--csv-dir",
-                    "data",
-                    "--derive-signals-inputs",
-                    "force",
-                    "--derive-threshold-inputs",
-                    "force",
-                    "--mode",
-                    "Premarket",
-                    "--render-report",
-                    "--report-schema",
-                    "report_spec.json",
-                    "--report-out",
-                    "out_report.md",
-                    "--now-et",
-                    FIXED_NOW_ET,
-                ],
-                cwd=workdir,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True,
+            _copy_project(
+                workdir,
+                states_src=FIXTURE_STATES,
+                trades_src=FIXTURE_TRADES,
+                data_src=FIXTURE_MARKET_DATA_DIR,
             )
+            _run_premarket_update(workdir)
 
             out_states = json.loads((workdir / "out_states.json").read_text(encoding="utf-8"))
             for position in (out_states.get("portfolio") or {}).get("positions") or []:
@@ -205,45 +232,27 @@ class RegressionPipelineTests(unittest.TestCase):
     def test_premarket_pipeline_rebuilds_market_snapshot_to_functional_held_and_fx_tickers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
-            _copy_project(workdir)
-            subprocess.run(
-                [
-                    sys.executable,
-                    "update_states.py",
-                    "--states",
-                    "states.json",
-                    "--out",
-                    "out_states.json",
-                    "--csv-dir",
-                    "data",
-                    "--derive-signals-inputs",
-                    "force",
-                    "--derive-threshold-inputs",
-                    "force",
-                    "--mode",
-                    "Premarket",
-                    "--render-report",
-                    "--report-schema",
-                    "report_spec.json",
-                    "--report-out",
-                    "out_report.md",
-                    "--now-et",
-                    FIXED_NOW_ET,
-                ],
-                cwd=workdir,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True,
+            _copy_project(
+                workdir,
+                states_src=FIXTURE_STATES,
+                trades_src=FIXTURE_TRADES,
+                data_src=FIXTURE_MARKET_DATA_DIR,
             )
+            _run_premarket_update(workdir)
 
             report_snapshot = json.loads((workdir / "report" / "2026-03-18_premarket.json").read_text(encoding="utf-8"))
             prices_now = ((report_snapshot.get("market") or {}).get("prices_now") or {})
-            self.assertEqual(set(prices_now), {"AAPL", "AMZN", "ARKQ", "GOOG", "INDA", "META", "MSFT", "NVDA", "SMH", "SPY", "TWD=X"})
+            self.assertEqual(set(prices_now), _expected_active_tickers(workdir / "config.json", workdir / "states.json"))
 
     def test_force_mode_allows_session_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
-            _copy_project(workdir)
+            _copy_project(
+                workdir,
+                states_src=FIXTURE_STATES,
+                trades_src=FIXTURE_TRADES,
+                data_src=FIXTURE_MARKET_DATA_DIR,
+            )
             base_cmd = [
                 sys.executable,
                 "update_states.py",
@@ -295,6 +304,34 @@ class RegressionPipelineTests(unittest.TestCase):
                 "# Daily Investment Report (Intraday)",
                 (workdir / "forced_intraday_report.md").read_text(encoding="utf-8"),
             )
+
+
+class LiveDataSmokeTests(unittest.TestCase):
+    def test_live_premarket_update_runs_and_emits_core_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            _copy_project(
+                workdir,
+                states_src=REPO_ROOT / "states.json",
+                trades_src=REPO_ROOT / "trades.json",
+                data_src=REPO_ROOT / "data",
+            )
+            _run_premarket_update(workdir, out_states="live_out_states.json", out_report="live_out_report.md")
+
+            report_text = (workdir / "live_out_report.md").read_text(encoding="utf-8")
+            self.assertIn("# Daily Investment Report (Premarket)", report_text)
+            self.assertIn("## Performance Summary", report_text)
+            self.assertIn("## Current Positions", report_text)
+            self.assertIn("## Signal Status", report_text)
+            self.assertIn("## t+1 Hypothetical Trigger Close Threshold (P_min)", report_text)
+
+            report_snapshot = json.loads((workdir / "report" / "2026-03-18_premarket.json").read_text(encoding="utf-8"))
+            prices_now = ((report_snapshot.get("market") or {}).get("prices_now") or {})
+            self.assertEqual(set(prices_now), _expected_active_tickers(workdir / "config.json", workdir / "states.json"))
+
+            out_states = json.loads((workdir / "live_out_states.json").read_text(encoding="utf-8"))
+            for position in (out_states.get("portfolio") or {}).get("positions") or []:
+                self.assertNotIn("notes", position)
 
 
 if __name__ == "__main__":
