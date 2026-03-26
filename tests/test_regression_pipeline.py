@@ -238,7 +238,7 @@ class RegressionPipelineTests(unittest.TestCase):
 
             report_snapshot = json.loads((workdir / "report" / "2026-03-18_premarket.json").read_text(encoding="utf-8"))
             prices_now = ((report_snapshot.get("market") or {}).get("prices_now") or {})
-            self.assertEqual(set(prices_now), {"ARKQ", "GOOG", "META", "NVDA", "SMH", "SPY", "TWD=X"})
+            self.assertEqual(set(prices_now), {"AAPL", "AMZN", "ARKQ", "GOOG", "INDA", "META", "MSFT", "NVDA", "SMH", "SPY", "TWD=X"})
 
     def test_force_mode_allows_session_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

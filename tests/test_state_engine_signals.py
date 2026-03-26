@@ -466,10 +466,10 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
         requested = [call.args[0] for call in mocked_download.call_args_list]
         self.assertEqual(set(requested), {"AAA", "BBB", "CCC", "DDD", "TWD=X"})
         end_dates = {call.args[0]: call.args[2] for call in mocked_download.call_args_list}
-        self.assertEqual(end_dates["AAA"], date(2026, 3, 24))
-        self.assertEqual(end_dates["BBB"], date(2026, 3, 24))
-        self.assertEqual(end_dates["CCC"], date(2026, 3, 24))
-        self.assertEqual(end_dates["DDD"], date(2026, 3, 24))
+        self.assertEqual(end_dates["AAA"], date(2026, 3, 25))
+        self.assertEqual(end_dates["BBB"], date(2026, 3, 25))
+        self.assertEqual(end_dates["CCC"], date(2026, 3, 25))
+        self.assertEqual(end_dates["DDD"], date(2026, 3, 25))
         self.assertEqual(end_dates["TWD=X"], date(2026, 3, 25))
 
     def test_refresh_csv_history_for_mode_updates_allows_same_day_fx_rows(self) -> None:
@@ -491,7 +491,7 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
                 )
 
         end_dates = {call.args[0]: call.args[2] for call in mocked_download.call_args_list}
-        self.assertEqual(end_dates["AAA"], date(2026, 3, 25))
+        self.assertEqual(end_dates["AAA"], date(2026, 3, 26))
         self.assertEqual(end_dates["TWD=X"], date(2026, 3, 26))
 
     def test_refresh_csv_history_for_intraday_updates_uses_same_day_equity_rows(self) -> None:

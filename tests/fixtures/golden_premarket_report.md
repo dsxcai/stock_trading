@@ -1,7 +1,7 @@
 # Daily Investment Report (Premarket)
 - Signal Basis: t=2026-03-17 (NYSE Close)
 - Execution Basis: t+1=2026-03-18 (NYSE Trading Day)
-- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-25.
+- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-26.
 
 ## Performance Summary
 | Item | Value |
@@ -18,25 +18,33 @@
 ## Current Positions
 | Bucket | Ticker | Shares | Cost (USD) | Price (Now) | Market Value (USD) | Unrealized PnL (USD) | Unrealized PnL (TWD) | Unrealized PnL % | Unrealized PnL % (TWD) | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Core | ARKQ | 70 | $8,698.20 | 121.8500 | $8,529.50 | $-168.70 | -619.45 | -1.94% | -0.23% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
-| Core | SPY | 17 | $11,618.54 | 670.7900 | $11,403.43 | $-215.11 | -935.98 | -1.85% | -0.26% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
-| Tactical | SMH | 29 | $11,494.64 | 396.8800 | $11,509.52 | $14.88 | -289.93 | 0.13% | -0.08% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
-| Core Subtotal | - | - | $20,316.74 | - | $19,932.93 | $-383.81 | -1,555.44 | -1.89% | -0.24% | - |
-| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,509.52 | $14.88 | -289.93 | 0.13% | -0.08% | - |
+| Core | ARKQ | 70 | $8,698.20 | 121.8500 | $8,529.50 | $-168.70 | -457.39 | -1.94% | -0.17% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
+| Core | SPY | 17 | $11,618.54 | 670.7900 | $11,403.43 | $-215.11 | -719.32 | -1.85% | -0.20% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
+| Tactical | SMH | 29 | $11,494.64 | 396.8800 | $11,509.52 | $14.88 | -71.25 | 0.13% | -0.02% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
+| Core Subtotal | - | - | $20,316.74 | - | $19,932.93 | $-383.81 | -1,176.71 | -1.89% | -0.18% | - |
+| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,509.52 | $14.88 | -71.25 | 0.13% | -0.02% | - |
 | Cash Pool | - | - | - | - | $73.35 | - | - | - | - | - |
-| Portfolio Total | - | - | $31,811.38 | - | $31,515.80 | $-368.93 | -1,845.37 | -1.16% | -0.18% | - |
+| Portfolio Total | - | - | $31,811.38 | - | $31,515.80 | $-368.93 | -1,247.96 | -1.16% | -0.12% | - |
 
 ## Signal Status
 | Ticker | A: Close(t) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |
 | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: |
+| AAPL | 254.2300 | SMA50 | 261.9912 | 260.8300 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
+| AMZN | 215.2000 | SMA50 | 222.6984 | 214.3300 | FALSE | TRUE | FALSE | 0 | NO_ACTION | 0 |
 | GOOG | 309.4100 | SMA50 | 318.9058 | 306.9300 | FALSE | TRUE | FALSE | 0 | NO_ACTION | 0 |
+| INDA | 48.5200 | SMA100 | 53.0637 | 49.9300 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
+| MSFT | 399.4100 | SMA50 | 426.2154 | 405.7600 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
 | NVDA | 181.9300 | SMA50 | 185.2566 | 184.7700 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
 | SMH | 396.8800 | SMA100 | 377.1832 | 397.3300 | TRUE | FALSE | FALSE | 29 | SELL_ALL | 29 |
 
 ## t+1 Hypothetical Trigger Close Threshold (P_min)
 | Ticker | MA Rule | SUM_{n-1} | Close(t-5) | SMA-Equivalent Threshold (strict >) | P_min (strict >) | Display |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| AAPL | SMA50 | $12,832.30 | 260.8100 | 261.8837 | 261.8837 | 261.88+ |
+| AMZN | SMA50 | $10,901.86 | 212.6500 | 222.4869 | 222.4869 | 222.49+ |
 | GOOG | SMA50 | $15,627.97 | 308.4200 | 318.9382 | 318.9382 | 318.94+ |
+| INDA | SMA100 | $5,251.08 | 49.2700 | 53.0412 | 53.0412 | 53.04+ |
+| MSFT | SMA50 | $20,837.92 | 404.8800 | 425.2637 | 425.2637 | 425.26+ |
 | NVDA | SMA50 | $9,074.71 | 186.0300 | 185.1982 | 186.0300 | 186.03+ |
 | SMH | SMA100 | $37,379.72 | 401.0300 | 377.5729 | 401.0300 | 401.03+ |
 

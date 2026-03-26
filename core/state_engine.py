@@ -954,19 +954,11 @@ def _csv_date_bounds(csv_path: str) -> Tuple[Optional[date], Optional[date]]:
         return (None, None)
     return (first, last)
 
-def _latest_completed_market_day_et(runtime: Dict[str, Any], now_et: datetime) -> str:
-    today = now_et.date()
-    if _is_trading_day_et(runtime, today) and _session_class_for_now_et(runtime, now_et) == 'afterclose':
-        return today.isoformat()
-    return _prev_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-
 def _autocsv_target_end_for_ticker(runtime: Dict[str, Any], ticker: str, now_et: datetime, mode_label: str) -> date:
-    ticker_norm = str(ticker or '').upper().strip()
-    if ticker_norm and ticker_norm in _fx_tickers_from_config(runtime):
-        return now_et.date()
-    if _normalize_mode_key(mode_label) == 'intraday':
-        return now_et.date()
-    return date.fromisoformat(_latest_completed_market_day_et(runtime, now_et))
+    _ = runtime
+    _ = ticker
+    _ = mode_label
+    return now_et.date()
 
 def _refresh_csv_history_for_mode_updates(
     states: Dict[str, Any],
