@@ -314,7 +314,7 @@
         "keep_groups": {
           "mode": "latest_full_plus_prev_simplified",
           "latest_full_groups": 1,
-          "prev_simplified_groups": { "path": "$.config.trade_render_policy.keep_prev_trade_days_simplified", "default": 5 }
+          "prev_simplified_groups": { "path": "$.config.reporting.trade_render_policy.keep_prev_trade_days_simplified", "default": 5 }
         }
       },
       "column_sets": {

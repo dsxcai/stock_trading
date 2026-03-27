@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-config_path="config.json"
+config_path="backtest_config.json"
 csv_dir="data"
 out_dir="backtest_$(date +%Y%m%d_%H%M%S)"
 lookback_trading_days=""
@@ -56,7 +56,7 @@ This script is all-in-one:
 4. generate the final markdown report
 
 Options:
-  --config PATH                   Config JSON path. Default: config.json
+  --config PATH                   Backtest config JSON path. Default: backtest_config.json
   --csv-dir PATH                  OHLCV CSV directory. Default: data
   --out-dir PATH                  Output directory. Default: backtest_<timestamp>
   --lookback-trading-days N       Trading-day lookback when --start-date is omitted

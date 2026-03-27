@@ -42,18 +42,22 @@ def _trade_cash_amount_ndigits(config_path: Path | None = None) -> int:
 def _minimal_config(trade_cash_amount_ndigits: int, state_selected_fields_ndigits: int = 4) -> dict:
     return {
         "state_engine": {
-            "trades_file": "trades.json",
-            "numeric_precision": {
-                "usd_amount": 2,
-                "display_price": 2,
-                "display_pct": 2,
-                "trade_cash_amount": int(trade_cash_amount_ndigits),
-                "trade_dedupe_amount": 6,
-                "state_selected_fields": int(state_selected_fields_ndigits),
-                "backtest_amount": 4,
-                "backtest_price": 4,
-                "backtest_rate": 6,
-                "backtest_cost_param": 6,
+            "meta": {
+                "trades_file": "trades.json",
+            },
+            "reporting": {
+                "numeric_precision": {
+                    "usd_amount": 2,
+                    "display_price": 2,
+                    "display_pct": 2,
+                    "trade_cash_amount": int(trade_cash_amount_ndigits),
+                    "trade_dedupe_amount": 6,
+                    "state_selected_fields": int(state_selected_fields_ndigits),
+                    "backtest_amount": 4,
+                    "backtest_price": 4,
+                    "backtest_rate": 6,
+                    "backtest_cost_param": 6,
+                },
             },
         }
     }

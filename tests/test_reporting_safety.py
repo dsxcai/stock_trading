@@ -39,7 +39,7 @@ class ReportingSafetyTests(unittest.TestCase):
 
     def test_render_report_uses_transient_report_meta(self) -> None:
         states = {
-            "config": {"doc": "Daily Investment Report"},
+            "config": {"meta": {"doc": "Daily Investment Report"}},
             "_report_meta": {
                 "mode": "Premarket",
                 "mode_key": "premarket",

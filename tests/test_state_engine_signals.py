@@ -30,11 +30,17 @@ def _numeric_precision() -> dict:
 
 def _signal_config(tactical_indicators: dict, *, fee_rate: float | None = None) -> dict:
     config = {
-        "tactical_indicators": dict(tactical_indicators),
-        "numeric_precision": _numeric_precision(),
+        "strategy": {
+            "tactical": {
+                "indicators": dict(tactical_indicators),
+            }
+        },
+        "reporting": {
+            "numeric_precision": _numeric_precision(),
+        },
     }
     if fee_rate is not None:
-        config["fee_rate"] = float(fee_rate)
+        config["execution"] = {"fee_rate": float(fee_rate)}
     return config
 
 
@@ -329,7 +335,10 @@ class StateEngineSignalTests(unittest.TestCase):
             {"Date": "2026-03-25", "Close": 110.0},
         ]
         intraday_runtime = {
-            "config": {"numeric_precision": _numeric_precision(), "fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            "config": {
+                "reporting": {"numeric_precision": _numeric_precision()},
+                "data": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            },
             "report_meta": {
                 "mode": "Intraday",
                 "mode_key": "intraday",
@@ -337,7 +346,10 @@ class StateEngineSignalTests(unittest.TestCase):
             },
         }
         premarket_runtime = {
-            "config": {"numeric_precision": _numeric_precision(), "fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            "config": {
+                "reporting": {"numeric_precision": _numeric_precision()},
+                "data": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            },
             "report_meta": {
                 "mode": "Premarket",
                 "mode_key": "premarket",
@@ -422,12 +434,14 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
     def _runtime_for_refresh() -> dict:
         runtime = {
             "config": {
-                "numeric_precision": _numeric_precision(),
-                "buckets": {
-                    "core": {"tickers": ["BBB"]},
-                    "tactical": {"tickers": ["CCC"], "cash_pool_ticker": "DDD"},
+                "reporting": {"numeric_precision": _numeric_precision()},
+                "portfolio": {
+                    "buckets": {
+                        "core": {"tickers": ["BBB"]},
+                        "tactical": {"tickers": ["CCC"], "cash_pool_ticker": "DDD"},
+                    }
                 },
-                "fx_pairs": {"usd_twd": {"ticker": "TWD=X"}},
+                "data": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
             },
             "history": {},
         }
@@ -561,7 +575,7 @@ class StateEngineCsvRefreshTests(unittest.TestCase):
                     )
 
     def test_import_csvs_into_states_errors_on_incomplete_local_rows(self) -> None:
-        runtime = {"config": {"numeric_precision": _numeric_precision()}, "history": {}}
+        runtime = {"config": {"reporting": {"numeric_precision": _numeric_precision()}}, "history": {}}
 
         with tempfile.TemporaryDirectory() as tmp:
             csv_dir = Path(tmp)
@@ -666,7 +680,7 @@ class StateEngineModeGateTests(unittest.TestCase):
             with mock.patch.object(state_engine, "_load_json", return_value={}), mock.patch.object(
                 state_engine,
                 "_load_runtime_config",
-                return_value={"numeric_precision": _numeric_precision()},
+                return_value={"reporting": {"numeric_precision": _numeric_precision()}},
             ), mock.patch.object(state_engine, "_load_trades_payload", return_value=[]), mock.patch.object(
                 state_engine, "_migrate_state_schema"
             ), mock.patch.object(state_engine, "_ensure_trading_calendar"), mock.patch.object(
@@ -698,7 +712,7 @@ class StateEngineModeGateTests(unittest.TestCase):
             with mock.patch.object(state_engine, "_load_json", return_value={}), mock.patch.object(
                 state_engine,
                 "_load_runtime_config",
-                return_value={"numeric_precision": _numeric_precision()},
+                return_value={"reporting": {"numeric_precision": _numeric_precision()}},
             ), mock.patch.object(state_engine, "_load_trades_payload", return_value=[]), mock.patch.object(
                 state_engine, "_migrate_state_schema"
             ), mock.patch.object(state_engine, "_ensure_trading_calendar"), mock.patch.object(
@@ -811,7 +825,7 @@ class StateEngineModeGateTests(unittest.TestCase):
 
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(state_engine, "_load_json", return_value={"portfolio": {"cash": {"usd": 1.0}, "positions": []}}))
-            stack.enter_context(mock.patch.object(state_engine, "_load_runtime_config", return_value={"numeric_precision": _numeric_precision()}))
+            stack.enter_context(mock.patch.object(state_engine, "_load_runtime_config", return_value={"reporting": {"numeric_precision": _numeric_precision()}}))
             stack.enter_context(mock.patch.object(state_engine, "_load_trades_payload", return_value=[]))
             stack.enter_context(mock.patch.object(state_engine, "_migrate_state_schema"))
             stack.enter_context(mock.patch.object(state_engine, "_ensure_trading_calendar"))
@@ -843,7 +857,7 @@ class StateEngineModeGateTests(unittest.TestCase):
 
     def test_hydrate_positions_from_trade_ledger_if_needed_rebuilds_minimal_states(self) -> None:
         states = {"portfolio": {"positions": [{"ticker": "AAA", "shares": 2}], "cash": {"usd": 0.0}}}
-        runtime = {"config": {"numeric_precision": _numeric_precision()}, "history": {}}
+        runtime = {"config": {"reporting": {"numeric_precision": _numeric_precision()}}, "history": {}}
         trades = [
             {
                 "trade_id": 1,

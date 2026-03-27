@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from utils.config_access import discover_state_engine_tickers, load_state_engine_config
 from utils.precision import load_state_engine_numeric_precision
 
 
@@ -50,34 +51,16 @@ def _copy_project(
 
 
 def _expected_active_tickers(config_path: Path, states_path: Path) -> set[str]:
-    cfg = json.loads(config_path.read_text(encoding="utf-8")).get("state_engine") or {}
+    cfg = load_state_engine_config(str(config_path))
     states = json.loads(states_path.read_text(encoding="utf-8"))
-    expected: list[str] = []
-    seen: set[str] = set()
-
-    def add(ticker: object) -> None:
-        ticker_norm = str(ticker or "").upper().strip()
-        if ticker_norm and ticker_norm not in seen:
-            seen.add(ticker_norm)
-            expected.append(ticker_norm)
-
-    buckets = cfg.get("buckets") or {}
-    for ticker in ((buckets.get("core") or {}).get("tickers") or []):
-        add(ticker)
-    tactical_bucket = buckets.get("tactical") or {}
-    for ticker in (tactical_bucket.get("tickers") or []):
-        add(ticker)
-    add(tactical_bucket.get("cash_pool_ticker"))
-    for ticker in (((buckets.get("tactical_cash_pool") or {}).get("tickers")) or []):
-        add(ticker)
-    for ticker in (cfg.get("tactical_indicators") or {}).keys():
-        add(ticker)
-    for fx_cfg in (cfg.get("fx_pairs") or {}).values():
-        if isinstance(fx_cfg, dict):
-            add(fx_cfg.get("ticker"))
+    expected = discover_state_engine_tickers(cfg)
+    seen = {ticker for ticker in expected}
     for position in (((states.get("portfolio") or {}).get("positions")) or []):
         if isinstance(position, dict):
-            add(position.get("ticker"))
+            ticker_norm = str(position.get("ticker") or "").upper().strip()
+            if ticker_norm and ticker_norm not in seen:
+                seen.add(ticker_norm)
+                expected.append(ticker_norm)
     return set(expected)
 
 

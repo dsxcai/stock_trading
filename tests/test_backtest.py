@@ -26,7 +26,65 @@ def _numeric_precision_overrides(**overrides: int) -> dict:
     return base
 
 
+def _state_engine_config(
+    *,
+    fee_rate: float,
+    csv_sources: dict,
+    tactical_indicators: dict,
+    numeric_precision: dict | None = None,
+    live_fee_rate: float | None = None,
+) -> dict:
+    return {
+        "state_engine": {
+            "execution": {
+                "fee_rate": fee_rate if live_fee_rate is None else live_fee_rate,
+            },
+            "portfolio": {
+                "buckets": {"tactical": {"tickers": list(tactical_indicators.keys())}},
+            },
+            "strategy": {
+                "tactical": {"indicators": tactical_indicators},
+            },
+            "data": {
+                "csv_sources": csv_sources,
+            },
+            "reporting": {
+                "numeric_precision": numeric_precision or _numeric_precision_overrides(),
+            },
+        },
+    }
+
+
 def _backtest_config(
+    *,
+    commission_per_trade: float,
+    slippage_bps: float,
+    backtest_starting_cash: float,
+    fee_rate: float,
+    backtest_strategy: str | None = None,
+    mean_reversion_backtest: dict | None = None,
+) -> dict:
+    payload = {
+        "runtime_config": "config.json",
+        "backtest": {
+            "default_strategy": backtest_strategy or "tactical",
+            "costs": {
+                "fee_rate": fee_rate,
+                "commission_per_trade": commission_per_trade,
+                "slippage_bps": slippage_bps,
+            },
+            "tactical": {
+                "starting_cash": backtest_starting_cash,
+            },
+        },
+    }
+    if mean_reversion_backtest is not None:
+        payload["backtest"]["mean_reversion"] = mean_reversion_backtest
+    return payload
+
+
+def _write_backtest_configs(
+    root: Path,
     *,
     commission_per_trade: float,
     slippage_bps: float,
@@ -38,33 +96,39 @@ def _backtest_config(
     backtest_strategy: str | None = None,
     mean_reversion_backtest: dict | None = None,
     live_fee_rate: float | None = None,
-) -> dict:
-    payload = {
-        "backtest": {
-            "default_strategy": backtest_strategy or "tactical",
-            "starting_cash": backtest_starting_cash,
-            "costs": {
-                "fee_rate": fee_rate,
-                "commission_per_trade": commission_per_trade,
-                "slippage_bps": slippage_bps,
-            },
-            "tactical": {
-                "starting_cash": backtest_starting_cash,
-                "tickers": list(tactical_indicators.keys()),
-                "indicators": tactical_indicators,
-            },
-        },
-        "state_engine": {
-            "fee_rate": fee_rate if live_fee_rate is None else live_fee_rate,
-            "csv_sources": csv_sources,
-            "buckets": {"tactical": {"tickers": list(tactical_indicators.keys())}},
-            "tactical_indicators": tactical_indicators,
-            "numeric_precision": numeric_precision or _numeric_precision_overrides(),
-        },
-    }
-    if mean_reversion_backtest is not None:
-        payload["backtest"]["mean_reversion"] = mean_reversion_backtest
-    return payload
+) -> Path:
+    runtime_config_path = root / "config.json"
+    runtime_config_path.write_text(
+        json.dumps(
+            _state_engine_config(
+                fee_rate=fee_rate,
+                csv_sources=csv_sources,
+                tactical_indicators=tactical_indicators,
+                numeric_precision=numeric_precision,
+                live_fee_rate=live_fee_rate,
+            ),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    backtest_config_path = root / "backtest_config.json"
+    backtest_config_path.write_text(
+        json.dumps(
+            _backtest_config(
+                commission_per_trade=commission_per_trade,
+                slippage_bps=slippage_bps,
+                backtest_starting_cash=backtest_starting_cash,
+                fee_rate=fee_rate,
+                backtest_strategy=backtest_strategy,
+                mean_reversion_backtest=mean_reversion_backtest,
+            ),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return backtest_config_path
 
 
 class BacktestTests(unittest.TestCase):
@@ -86,26 +150,19 @@ class BacktestTests(unittest.TestCase):
                 "2026-01-13,9,11,8,11,100\n",
                 encoding="utf-8",
             )
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    _backtest_config(
-                        commission_per_trade=0.0,
-                        slippage_bps=0.0,
-                        backtest_starting_cash=100.0,
-                        fee_rate=0.0,
-                        csv_sources={"AAA": "AAA.csv"},
-                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            backtest_config_path = _write_backtest_configs(
+                root,
+                commission_per_trade=0.0,
+                slippage_bps=0.0,
+                backtest_starting_cash=100.0,
+                fee_rate=0.0,
+                csv_sources={"AAA": "AAA.csv"},
+                tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
             )
 
             with self.assertRaisesRegex(ValueError, "end_date is later than the last common trading day"):
                 run_backtest(
-                    config_path=str(config_path),
+                    config_path=str(backtest_config_path),
                     csv_dir=str(csv_dir),
                     start_date_et="2026-01-08",
                     end_date_et="2026-01-31",
@@ -122,26 +179,19 @@ class BacktestTests(unittest.TestCase):
                 day = (start + timedelta(days=idx)).isoformat()
                 rows.append(f"{day},10,10,10,10,100")
             (csv_dir / "AAA.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    _backtest_config(
-                        commission_per_trade=0.0,
-                        slippage_bps=0.0,
-                        backtest_starting_cash=100.0,
-                        fee_rate=0.0,
-                        csv_sources={"AAA": "AAA.csv"},
-                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 100}},
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            backtest_config_path = _write_backtest_configs(
+                root,
+                commission_per_trade=0.0,
+                slippage_bps=0.0,
+                backtest_starting_cash=100.0,
+                fee_rate=0.0,
+                csv_sources={"AAA": "AAA.csv"},
+                tactical_indicators={"AAA": {"ma_type": "SMA", "window": 100}},
             )
 
             with self.assertRaisesRegex(ValueError, "not enough warmup history before the requested start_date"):
                 run_backtest(
-                    config_path=str(config_path),
+                    config_path=str(backtest_config_path),
                     csv_dir=str(csv_dir),
                     start_date_et="2026-02-15",
                     end_date_et="2026-04-20",
@@ -165,25 +215,18 @@ class BacktestTests(unittest.TestCase):
                 "2026-01-13,9,11,8,11,100\n",
                 encoding="utf-8",
             )
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    _backtest_config(
-                        commission_per_trade=1.0,
-                        slippage_bps=0.0,
-                        backtest_starting_cash=100.0,
-                        fee_rate=0.01,
-                        live_fee_rate=0.0,
-                        csv_sources={"AAA": "AAA.csv"},
-                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            backtest_config_path = _write_backtest_configs(
+                root,
+                commission_per_trade=1.0,
+                slippage_bps=0.0,
+                backtest_starting_cash=100.0,
+                fee_rate=0.01,
+                live_fee_rate=0.0,
+                csv_sources={"AAA": "AAA.csv"},
+                tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
             )
 
-            result = run_backtest(config_path=str(config_path), csv_dir=str(csv_dir))
+            result = run_backtest(config_path=str(backtest_config_path), csv_dir=str(csv_dir))
 
             gross_summary = result["gross"]["summary"]
             net_summary = result["net"]["summary"]
@@ -223,25 +266,18 @@ class BacktestTests(unittest.TestCase):
                 "2026-01-13,9,11,8,11,100\n",
                 encoding="utf-8",
             )
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    _backtest_config(
-                        commission_per_trade=0.0,
-                        slippage_bps=0.0,
-                        backtest_starting_cash=100.0,
-                        fee_rate=0.0,
-                        csv_sources={"AAA": "AAA.csv"},
-                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            backtest_config_path = _write_backtest_configs(
+                root,
+                commission_per_trade=0.0,
+                slippage_bps=0.0,
+                backtest_starting_cash=100.0,
+                fee_rate=0.0,
+                csv_sources={"AAA": "AAA.csv"},
+                tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
             )
 
             result = run_backtest(
-                config_path=str(config_path),
+                config_path=str(backtest_config_path),
                 csv_dir=str(csv_dir),
                 start_date_et="2026-01-08",
                 end_date_et="2026-01-12",
@@ -272,25 +308,18 @@ class BacktestTests(unittest.TestCase):
                 "2026-01-13,9,11,8,11,100\n",
                 encoding="utf-8",
             )
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    _backtest_config(
-                        commission_per_trade=0.0,
-                        slippage_bps=0.0,
-                        backtest_starting_cash=100.0,
-                        fee_rate=0.0,
-                        csv_sources={"AAA": "AAA.csv"},
-                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            backtest_config_path = _write_backtest_configs(
+                root,
+                commission_per_trade=0.0,
+                slippage_bps=0.0,
+                backtest_starting_cash=100.0,
+                fee_rate=0.0,
+                csv_sources={"AAA": "AAA.csv"},
+                tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
             )
             out_dir = root / "out"
 
-            result = run_backtest(config_path=str(config_path), csv_dir=str(csv_dir))
+            result = run_backtest(config_path=str(backtest_config_path), csv_dir=str(csv_dir))
             written = write_backtest_outputs(result, str(out_dir))
             summary_payload = json.loads(Path(written["summary"]).read_text(encoding="utf-8"))
             report_text = Path(written["report"]).read_text(encoding="utf-8")
@@ -320,26 +349,19 @@ class BacktestTests(unittest.TestCase):
                 "2026-01-13,9,11,8,11,100\n",
                 encoding="utf-8",
             )
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    _backtest_config(
-                        commission_per_trade=0.0,
-                        slippage_bps=0.0,
-                        backtest_starting_cash=100.0,
-                        fee_rate=0.0,
-                        csv_sources={"AAA": "AAA.csv"},
-                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
-                        numeric_precision=_numeric_precision_overrides(usd_amount=1, display_pct=1),
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            backtest_config_path = _write_backtest_configs(
+                root,
+                commission_per_trade=0.0,
+                slippage_bps=0.0,
+                backtest_starting_cash=100.0,
+                fee_rate=0.0,
+                csv_sources={"AAA": "AAA.csv"},
+                tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
+                numeric_precision=_numeric_precision_overrides(usd_amount=1, display_pct=1),
             )
             out_dir = root / "out"
 
-            result = run_backtest(config_path=str(config_path), csv_dir=str(csv_dir))
+            result = run_backtest(config_path=str(backtest_config_path), csv_dir=str(csv_dir))
             written = write_backtest_outputs(result, str(out_dir))
             report_text = Path(written["report"]).read_text(encoding="utf-8")
 
@@ -360,32 +382,25 @@ class BacktestTests(unittest.TestCase):
                 "2026-01-07,102,104,101,104,100\n",
                 encoding="utf-8",
             )
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    _backtest_config(
-                        commission_per_trade=0.0,
-                        slippage_bps=0.0,
-                        backtest_starting_cash=100.0,
-                        fee_rate=0.0,
-                        csv_sources={"AAA": "AAA.csv"},
-                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
-                        backtest_strategy="mean-reversion",
-                        mean_reversion_backtest={
-                            "tickers": ["AAA"],
-                            "entry_drawdown_pct": 0.02,
-                            "take_profit_pct": 0.02,
-                            "stop_loss_pct": 0.07,
-                            "starting_cash_per_ticker": 100.0,
-                        },
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            backtest_config_path = _write_backtest_configs(
+                root,
+                commission_per_trade=0.0,
+                slippage_bps=0.0,
+                backtest_starting_cash=100.0,
+                fee_rate=0.0,
+                csv_sources={"AAA": "AAA.csv"},
+                tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
+                backtest_strategy="mean-reversion",
+                mean_reversion_backtest={
+                    "tickers": ["AAA"],
+                    "entry_drawdown_pct": 0.02,
+                    "take_profit_pct": 0.02,
+                    "stop_loss_pct": 0.07,
+                    "starting_cash_per_ticker": 100.0,
+                },
             )
 
-            result = run_backtest(config_path=str(config_path), csv_dir=str(csv_dir), strategy="mean-reversion")
+            result = run_backtest(config_path=str(backtest_config_path), csv_dir=str(csv_dir), strategy="mean-reversion")
 
             self.assertEqual(result["strategy"], "mean-reversion")
             net_summary = result["net"]["summary"]
@@ -421,33 +436,26 @@ class BacktestTests(unittest.TestCase):
                 "2026-01-07,90,90,90,90,100\n",
                 encoding="utf-8",
             )
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    _backtest_config(
-                        commission_per_trade=0.0,
-                        slippage_bps=0.0,
-                        backtest_starting_cash=100.0,
-                        fee_rate=0.0,
-                        csv_sources={"AAA": "AAA.csv"},
-                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
-                        backtest_strategy="mean-reversion",
-                        mean_reversion_backtest={
-                            "tickers": ["AAA"],
-                            "entry_drawdown_pct": 0.02,
-                            "take_profit_pct": 0.02,
-                            "stop_loss_pct": 0.07,
-                            "starting_cash_per_ticker": 100.0,
-                        },
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            backtest_config_path = _write_backtest_configs(
+                root,
+                commission_per_trade=0.0,
+                slippage_bps=0.0,
+                backtest_starting_cash=100.0,
+                fee_rate=0.0,
+                csv_sources={"AAA": "AAA.csv"},
+                tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
+                backtest_strategy="mean-reversion",
+                mean_reversion_backtest={
+                    "tickers": ["AAA"],
+                    "entry_drawdown_pct": 0.02,
+                    "take_profit_pct": 0.02,
+                    "stop_loss_pct": 0.07,
+                    "starting_cash_per_ticker": 100.0,
+                },
             )
             out_dir = root / "out"
 
-            result = run_backtest(config_path=str(config_path), csv_dir=str(csv_dir), strategy="mean-reversion")
+            result = run_backtest(config_path=str(backtest_config_path), csv_dir=str(csv_dir), strategy="mean-reversion")
             written = write_backtest_outputs(result, str(out_dir))
             summary_payload = json.loads(Path(written["summary"]).read_text(encoding="utf-8"))
             report_text = Path(written["report"]).read_text(encoding="utf-8")

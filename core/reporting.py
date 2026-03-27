@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from core.report_meta import _effective_report_meta, _migrate_state_schema, _normalize_mode_key
+from utils.config_access import config_doc
 
 def _extract_json_from_text(txt: str) -> Dict[str, Any]:
     s = txt.strip()
@@ -335,7 +336,7 @@ def render_grouped_trade_table(table_spec: Dict[str, Any], rows: List[Dict[str, 
 def report_title_from_meta(states: Dict[str, Any], mode: str) -> str:
     meta = _effective_report_meta(states, mode)
     cfg = states.get('config', {}) or {}
-    doc = cfg.get('doc') or meta.get('doc') or 'Daily Investment Report'
+    doc = config_doc(cfg) or meta.get('doc') or 'Daily Investment Report'
     if isinstance(doc, str) and '|' in doc:
         doc = doc.split('|')[-1].strip() or 'Daily Investment Report'
     mode_label = meta.get('mode') or str(mode or '')

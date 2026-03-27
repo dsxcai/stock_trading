@@ -1,0 +1,21 @@
+{
+  "runtime_config": "config.json",
+  "backtest": {
+    "default_strategy": "tactical",
+    "lookback_trading_days": 252,
+    "costs": {
+      "fee_rate": 0.002,
+      "commission_per_trade": 0.0,
+      "slippage_bps": 2.0
+    },
+    "tactical": {
+      "starting_cash": 100000.0
+    },
+    "mean_reversion": {
+      "entry_drawdown_pct": 0.02,
+      "take_profit_pct": 0.02,
+      "stop_loss_pct": 0.07,
+      "starting_cash_per_ticker": 100000.0
+    }
+  }
+}

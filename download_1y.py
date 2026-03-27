@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import json
 import logging
 from pathlib import Path
 from typing import Any, Optional
@@ -14,6 +13,7 @@ try:
 except ModuleNotFoundError:
     yf = None
 
+from utils.config_access import discover_state_engine_tickers, load_state_engine_config
 from utils.logger import configure_logging, log_run_header
 
 LOGGER = logging.getLogger("investment.download_1y")
@@ -34,22 +34,7 @@ def yesterday() -> dt.date:
 
 def load_tickers_from_config(path: str) -> list[str]:
     """Load unique tickers from config.json."""
-    config = json.loads(Path(path).read_text(encoding="utf-8"))
-    tickers = config.get("tickers") or []
-    fx_pairs = ((config.get("state_engine") or {}).get("fx_pairs") or {})
-    for fx_cfg in fx_pairs.values():
-        if isinstance(fx_cfg, dict):
-            fx_ticker = str(fx_cfg.get("ticker") or "").strip()
-            if fx_ticker:
-                tickers.append(fx_ticker)
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for ticker in tickers:
-        value = str(ticker).strip().upper()
-        if value and value not in seen:
-            ordered.append(value)
-            seen.add(value)
-    return ordered
+    return discover_state_engine_tickers(load_state_engine_config(path))
 
 
 def _flatten_download_columns(data: pd.DataFrame) -> pd.DataFrame:

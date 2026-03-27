@@ -161,12 +161,15 @@ class StrategyAndDownloadTests(unittest.TestCase):
             config_path = Path(tmp) / "config.json"
             config_path.write_text(
                 '{'
-                '"tickers": ["SPY", "SMH"], '
-                '"state_engine": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}}'
+                '"state_engine": {'
+                '"portfolio": {"buckets": {"core": {"tickers": ["SPY"]}, "tactical": {"cash_pool_ticker": "META"}}}, '
+                '"strategy": {"tactical": {"indicators": {"SMH": {"ma_type": "SMA", "window": 50}}}}, '
+                '"data": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}}'
+                '}'
                 '}',
                 encoding="utf-8",
             )
-            self.assertEqual(load_tickers_from_config(str(config_path)), ["SPY", "SMH", "TWD=X"])
+            self.assertEqual(load_tickers_from_config(str(config_path)), ["SPY", "META", "SMH", "TWD=X"])
 
 
 if __name__ == "__main__":

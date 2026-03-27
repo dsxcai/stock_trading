@@ -9,7 +9,7 @@ from utils.logger import configure_logging, emit, log_run_header
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config.json", help="External config JSON path")
+    parser.add_argument("--config", default="backtest_config.json", help="Backtest config JSON path")
     parser.add_argument("--csv-dir", default="./data", help="Directory containing OHLCV CSV files")
     parser.add_argument(
         "--strategy",

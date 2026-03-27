@@ -20,18 +20,22 @@ def _trade_cash_amount_ndigits(config_path: Path | None = None) -> int:
 def _minimal_config(trade_cash_amount_ndigits: int, state_selected_fields_ndigits: int = 4) -> dict:
     return {
         "state_engine": {
-            "trades_file": "trades.json",
-            "numeric_precision": {
-                "usd_amount": 2,
-                "display_price": 2,
-                "display_pct": 2,
-                "trade_cash_amount": int(trade_cash_amount_ndigits),
-                "trade_dedupe_amount": 6,
-                "state_selected_fields": int(state_selected_fields_ndigits),
-                "backtest_amount": 4,
-                "backtest_price": 4,
-                "backtest_rate": 6,
-                "backtest_cost_param": 6,
+            "meta": {
+                "trades_file": "trades.json",
+            },
+            "reporting": {
+                "numeric_precision": {
+                    "usd_amount": 2,
+                    "display_price": 2,
+                    "display_pct": 2,
+                    "trade_cash_amount": int(trade_cash_amount_ndigits),
+                    "trade_dedupe_amount": 6,
+                    "state_selected_fields": int(state_selected_fields_ndigits),
+                    "backtest_amount": 4,
+                    "backtest_price": 4,
+                    "backtest_rate": 6,
+                    "backtest_cost_param": 6,
+                },
             },
         }
     }
@@ -218,17 +222,8 @@ class ImportedTradesJsonTests(unittest.TestCase):
             positions = states.get("portfolio", {}).get("positions", [])
             self.assertEqual(len(positions), 1)
             position = positions[0]
-            self.assertEqual(position["ticker"], "AAA")
-            self.assertEqual(int(position["shares"]), 2)
-            self.assertAlmostEqual(float(position["cost_usd"]), 502.0, places=2)
-            self.assertAlmostEqual(float(position["price_now"]), 250.0, places=2)
-            self.assertAlmostEqual(float(position["market_value_usd"]), 500.0, places=2)
-            self.assertAlmostEqual(float(position["unrealized_pnl_usd"]), -2.0, places=2)
-
-            portfolio_totals = states.get("portfolio", {}).get("totals", {}).get("portfolio", {})
-            self.assertAlmostEqual(float(portfolio_totals["holdings_cost_usd"]), 502.0, places=2)
-            self.assertAlmostEqual(float(portfolio_totals["holdings_mv_usd"]), 500.0, places=2)
-            self.assertAlmostEqual(float(portfolio_totals["unrealized_pnl_usd"]), -2.0, places=2)
+            self.assertEqual(position, {"ticker": "AAA", "shares": 2})
+            self.assertNotIn("totals", states.get("portfolio", {}))
 
     def test_imported_trades_json_replace_replaces_scope_only(self) -> None:
         existing = [

@@ -23,6 +23,7 @@ from core.state_engine import (
     _resolve_runtime_report_meta,
     _update_portfolio_performance,
 )
+from utils.config_access import config_trades_file
 from utils.logger import configure_logging, emit, log_run_header
 from utils.precision import state_engine_numeric_precision
 
@@ -31,7 +32,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--states", default="states.json")
     parser.add_argument("--config", default="config.json", help="External config JSON path")
-    parser.add_argument("--trades-file", default="", help="Optional external trades JSON path. Default: config state_engine.trades_file or trades.json")
+    parser.add_argument("--trades-file", default="", help="Optional external trades JSON path. Default: config state_engine.meta.trades_file or trades.json")
     parser.add_argument("--schema", default="report_spec.json", help="report_schema.md or report_spec.json")
     parser.add_argument("--mode", required=True, help="Mode snapshot to render, such as Premarket, Intraday, or AfterClose")
     parser.add_argument("--date", default="", help="Optional YYYY-MM-DD used only for the output filename")
@@ -55,7 +56,7 @@ def main() -> None:
         config = _load_runtime_config(config_path)
         numeric_precision = state_engine_numeric_precision(config)
         engine_runtime = {"config": config, "history": {}}
-        trades_file = args.trades_file.strip() or str((config or {}).get("trades_file") or "trades.json")
+        trades_file = args.trades_file.strip() or config_trades_file(config) or "trades.json"
         trades_path = Path(trades_file)
         if not trades_path.is_absolute():
             trades_path = Path(args.states).resolve().parent / trades_path

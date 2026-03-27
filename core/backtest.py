@@ -13,6 +13,12 @@ from core import state_engine as live_runtime
 from core.models import BacktestCostModel
 from core.strategy import _allocate_buy_shares_across_triggered_signals, _read_ohlcv_csv
 from core.tactical_engine import compute_tactical_plan
+from utils.config_access import (
+    config_csv_sources,
+    config_tactical_indicators,
+    load_json_object,
+    load_state_engine_config,
+)
 from utils.precision import (
     format_currency,
     format_percent_from_ratio,
@@ -25,7 +31,7 @@ from utils.precision import (
 def _backtest_cfg(raw_config: Dict[str, Any]) -> Dict[str, Any]:
     cfg = raw_config.get("backtest")
     if not isinstance(cfg, dict):
-        raise KeyError("config.json must contain object key 'backtest'")
+        raise KeyError("backtest_config.json must contain object key 'backtest'")
     return cfg
 
 
@@ -50,31 +56,36 @@ def _resolve_backtest_runtime_config(raw_config: Dict[str, Any], runtime_config:
 
     if cost_cfg.get("fee_rate") is None:
         raise KeyError("config.backtest.costs.fee_rate must be configured")
-    resolved["fee_rate"] = float(cost_cfg.get("fee_rate") or 0.0)
+    resolved.setdefault("execution", {})["fee_rate"] = float(cost_cfg.get("fee_rate") or 0.0)
 
     indicators_override = tactical_cfg.get("indicators")
-    if not isinstance(indicators_override, dict) or not indicators_override:
-        raise KeyError("config.backtest.tactical.indicators must be configured")
-    resolved["tactical_indicators"] = {
-        str(ticker).upper(): copy.deepcopy(spec)
-        for ticker, spec in indicators_override.items()
-    }
+    if indicators_override is not None:
+        if not isinstance(indicators_override, dict) or not indicators_override:
+            raise KeyError("config.backtest.tactical.indicators must be an object when configured")
+        resolved.setdefault("strategy", {}).setdefault("tactical", {})["indicators"] = copy.deepcopy(indicators_override)
+    resolved_indicators = config_tactical_indicators(resolved)
+    if not resolved_indicators:
+        raise KeyError("state_engine.strategy.tactical.indicators must be configured")
 
     tickers_override = tactical_cfg.get("tickers")
     if isinstance(tickers_override, list) and tickers_override:
         resolved_tickers = [str(ticker).upper() for ticker in tickers_override]
     else:
-        resolved_tickers = sorted(resolved["tactical_indicators"].keys())
-    resolved.setdefault("buckets", {}).setdefault("tactical", {})["tickers"] = resolved_tickers
+        resolved_tickers = sorted(str(ticker).upper() for ticker in resolved_indicators.keys())
+    resolved.setdefault("portfolio", {}).setdefault("buckets", {}).setdefault("tactical", {})["tickers"] = resolved_tickers
 
     return resolved
 
 
 def _load_backtest_config(config_path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise TypeError(f"config root must be an object: {config_path}")
-    runtime_config = _resolve_backtest_runtime_config(raw, live_runtime._load_runtime_config(config_path))
+    raw = load_json_object(config_path)
+    runtime_config_ref = str(raw.get("runtime_config") or "").strip()
+    if not runtime_config_ref:
+        raise KeyError("backtest_config.json must contain string key 'runtime_config'")
+    runtime_config_path = Path(runtime_config_ref)
+    if not runtime_config_path.is_absolute():
+        runtime_config_path = Path(config_path).resolve().parent / runtime_config_path
+    runtime_config = _resolve_backtest_runtime_config(raw, load_state_engine_config(str(runtime_config_path)))
     return raw, runtime_config
 
 
@@ -151,7 +162,7 @@ def _comparison_summary(
 
 
 def _resolve_csv_path(runtime_config: Dict[str, Any], csv_dir: str, ticker: str) -> Path:
-    csv_sources = runtime_config.get("csv_sources", {}) or {}
+    csv_sources = config_csv_sources(runtime_config)
     source = str(csv_sources.get(ticker) or f"{ticker}.csv")
     path = Path(source)
     if not path.is_absolute():
@@ -200,7 +211,7 @@ def _warmup_bars(runtime_config: Dict[str, Any]) -> int:
         6,
         max(
             (live_runtime._parse_indicator_window(rule) or 0)
-            for rule in (runtime_config.get("tactical_indicators") or {}).values()
+            for rule in config_tactical_indicators(runtime_config).values()
         ),
     )
 
@@ -735,7 +746,7 @@ def _simulate_path(
     if len(trading_dates) < 7:
         raise ValueError("not enough common trading days to simulate the tactical rules")
 
-    tactical_tickers = sorted(str(ticker).upper() for ticker in (runtime_config.get("tactical_indicators") or {}).keys())
+    tactical_tickers = sorted(str(ticker).upper() for ticker in config_tactical_indicators(runtime_config).keys())
     warmup_bars = _warmup_bars(runtime_config)
     if len(trading_dates) <= warmup_bars:
         raise ValueError("not enough common trading days after warmup to run the backtest")
@@ -867,9 +878,9 @@ def _resolve_mean_reversion_params(
         tactical_cfg = _nested_config_value(_backtest_cfg(raw_config), "tactical") or {}
         tickers = [str(ticker).upper() for ticker in (tactical_cfg.get("tickers") or []) if str(ticker or "").strip()]
     if not tickers:
-        tickers = sorted(str(ticker).upper() for ticker in (runtime_config.get("tactical_indicators") or {}).keys())
+        tickers = sorted(str(ticker).upper() for ticker in config_tactical_indicators(runtime_config).keys())
     if not tickers:
-        raise ValueError("mean-reversion backtest requires tickers from backtest.mean_reversion.tickers, backtest.tactical.tickers, or state_engine.tactical_indicators")
+        raise ValueError("mean-reversion backtest requires tickers from backtest.mean_reversion.tickers, backtest.tactical.tickers, or state_engine.strategy.tactical.indicators")
 
     def _pct_value(name: str, explicit: Optional[float], default_value: float) -> float:
         value = explicit
@@ -1254,12 +1265,12 @@ def run_backtest(
         strategy
         or _nested_config_value(_backtest_cfg(raw_config), "default_strategy")
     )
-    tactical_indicators = runtime_config.get("tactical_indicators") or {}
+    tactical_indicators = config_tactical_indicators(runtime_config)
     tactical_tickers = sorted(str(ticker).upper() for ticker in tactical_indicators.keys())
     params = None
     if strategy_key == "tactical":
         if not tactical_tickers:
-            raise ValueError("state_engine.tactical_indicators is empty")
+            raise ValueError("state_engine.strategy.tactical.indicators is empty")
         tickers = tactical_tickers
         warmup_bars = None
     else:

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from core.models import TacticalPlan
 from core.report_meta import _normalize_mode_key
 from core.reconciliation import _trade_buy_total_cost_usd
+from utils.config_access import config_fx_pairs, config_tactical_indicators
 
 
 def _trade_note_sort_key(trade: Dict[str, Any]) -> tuple[str, str, int]:
@@ -84,7 +85,7 @@ def _open_lot_notes_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, str]:
 def _usd_twd_fx_ticker(config: Optional[Dict[str, Any]]) -> str:
     if not isinstance(config, dict):
         return ""
-    usd_twd_cfg = ((config.get("fx_pairs") or {}).get("usd_twd") or {})
+    usd_twd_cfg = (config_fx_pairs(config).get("usd_twd") or {})
     if not isinstance(usd_twd_cfg, dict):
         return ""
     return str(usd_twd_cfg.get("ticker") or "").upper().strip()
@@ -118,9 +119,7 @@ def _report_active_tickers(states: Dict[str, Any], config: Optional[Dict[str, An
         if ticker and shares > 0 and ticker not in seen:
             seen.add(ticker)
             tickers.append(ticker)
-    tactical_indicators = {}
-    if isinstance(config, dict):
-        tactical_indicators = dict(config.get("tactical_indicators") or {})
+    tactical_indicators = config_tactical_indicators(config) if isinstance(config, dict) else {}
     for ticker in tactical_indicators:
         ticker_norm = str(ticker or "").upper().strip()
         if ticker_norm and ticker_norm not in seen:

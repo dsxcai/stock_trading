@@ -28,13 +28,13 @@ class ReportBundleTests(unittest.TestCase):
 
         report_root = build_report_root(
             states,
-            config={"doc": "x", "trades_file": "trades.json"},
+            config={"meta": {"doc": "x", "trades_file": "trades.json"}},
             trades=[{"trade_id": 1, "ticker": "AAA"}],
             tactical_plan=plan,
         )
 
         self.assertEqual(states, baseline)
-        self.assertEqual(report_root["config"]["doc"], "x")
+        self.assertEqual(report_root["config"]["meta"]["doc"], "x")
         self.assertEqual(report_root["trades"][0]["ticker"], "AAA")
         self.assertEqual(report_root["signals"]["tactical"][0]["t_plus_1_action"], "BUY")
         self.assertEqual(report_root["thresholds"]["buy_signal_close_price_thresholds"][0]["threshold"], 11.0)
@@ -93,7 +93,7 @@ class ReportBundleTests(unittest.TestCase):
 
         report_root = build_report_root(
             states,
-            config={"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            config={"data": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}}},
             trades=[
                 {"trade_id": 1, "ticker": "AAA", "trade_date_et": "2026-03-01", "time_tw": "2026/03/01 22:00:00", "side": "BUY", "shares": 1, "cash_amount": 100.0, "notes": "first lot"},
                 {"trade_id": 2, "ticker": "AAA", "trade_date_et": "2026-03-06", "time_tw": "2026/03/06 22:00:00", "side": "BUY", "shares": 2, "cash_amount": 240.0, "notes": "second lot"},
@@ -130,7 +130,7 @@ class ReportBundleTests(unittest.TestCase):
 
         report_root = build_report_root(
             states,
-            config={"tactical_indicators": {"AAA": "SMA2"}},
+            config={"strategy": {"tactical": {"indicators": {"AAA": "SMA2"}}}},
             report_meta={
                 "mode": "Intraday",
                 "mode_key": "intraday",
@@ -165,7 +165,7 @@ class ReportBundleTests(unittest.TestCase):
 
         report_root = build_report_root(
             states,
-            config={"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            config={"data": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}}},
             trades=[
                 {"trade_id": 1, "ticker": "AAA", "trade_date_et": "2026-03-17", "time_tw": "2026/03/17 22:00:00", "side": "BUY", "shares": 1, "cash_amount": 100.0, "notes": "lot"},
             ],

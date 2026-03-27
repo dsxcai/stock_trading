@@ -12,6 +12,7 @@ from core.strategy import (
     _normalize_ma_rule,
     _parse_indicator_window,
 )
+from utils.config_access import config_fee_rate, config_tactical_indicators
 from utils.precision import round_with_precision, state_engine_numeric_precision
 
 
@@ -44,8 +45,8 @@ def compute_tactical_plan(
 
     config = runtime_support._runtime_config(runtime)
     numeric_precision = state_engine_numeric_precision(config)
-    fee_rate = max(float(config.get("fee_rate") or 0.0), 0.0)
-    tactical_indicators = config.get("tactical_indicators") or {
+    fee_rate = max(float(config_fee_rate(config) or 0.0), 0.0)
+    tactical_indicators = config_tactical_indicators(config) or {
         "GOOG": "SMA50",
         "SMH": "SMA100",
         "NVDA": "SMA50",

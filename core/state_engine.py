@@ -30,6 +30,16 @@ from core.strategy import (
     _read_ohlcv_csv,
 )
 from core.tactical_engine import apply_tactical_plan, compute_tactical_plan
+from utils.config_access import (
+    config_buckets,
+    config_csv_sources,
+    config_fx_pairs,
+    config_tactical_indicators,
+    config_trades_file,
+    config_trading_calendar,
+    discover_state_engine_tickers,
+    load_state_engine_config,
+)
 from utils.parsers import (
     _normalize_time_tw,
     _normalize_trade_date_et,
@@ -48,13 +58,7 @@ def _load_runtime_config(path: str) -> Dict[str, Any]:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(path)
-    raw = json.loads(p.read_text(encoding='utf-8'))
-    if not isinstance(raw, dict):
-        raise TypeError(f'config root must be an object: {path}')
-    scoped = raw.get('state_engine')
-    if not isinstance(scoped, dict):
-        raise KeyError(f"config.json must contain object key 'state_engine': {path}")
-    return dict(scoped)
+    return load_state_engine_config(path)
 
 def _runtime_config(runtime: Dict[str, Any]) -> Dict[str, Any]:
     cfg = runtime.get('config') or {}
@@ -63,6 +67,15 @@ def _runtime_config(runtime: Dict[str, Any]) -> Dict[str, Any]:
 
 def _runtime_numeric_precision(runtime: Dict[str, Any]) -> Dict[str, int]:
     return state_engine_numeric_precision(_runtime_config(runtime))
+
+
+def _runtime_data_config(runtime: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = _runtime_config(runtime)
+    data = cfg.get('data')
+    if not isinstance(data, dict):
+        data = {}
+        cfg['data'] = data
+    return data
 
 def _runtime_history(runtime: Dict[str, Any]) -> Dict[str, Any]:
     hist = runtime.get('history')
@@ -186,34 +199,54 @@ _OPEN_TIME_ET = time(9, 30)
 _DEFAULT_CLOSE_TIME_ET = time(16, 0)
 
 def _default_trading_calendar_2026() -> Dict[str, Any]:
-    return {'full_day_closed': [{'date_et': '2026-01-01', 'name': 'New Year’s Day', 'note': 'Market closed'}, {'date_et': '2026-01-19', 'name': 'Martin Luther King, Jr. Day', 'note': 'Market closed'}, {'date_et': '2026-02-16', 'name': 'Presidents Day (Washington’s Birthday)', 'note': 'Market closed'}, {'date_et': '2026-04-03', 'name': 'Good Friday', 'note': 'Market closed'}, {'date_et': '2026-05-25', 'name': 'Memorial Day', 'note': 'Market closed'}, {'date_et': '2026-06-19', 'name': 'Juneteenth', 'note': 'Market closed'}, {'date_et': '2026-07-03', 'name': 'Independence Day (Observed)', 'note': 'Market closed'}, {'date_et': '2026-09-07', 'name': 'Labor Day', 'note': 'Market closed'}, {'date_et': '2026-11-26', 'name': 'Thanksgiving Day', 'note': 'Market closed'}, {'date_et': '2026-12-25', 'name': 'Christmas Day', 'note': 'Market closed'}], 'early_close': [{'date_et': '2026-11-27', 'reason': 'Day After Thanksgiving', 'close_time_et': '13:00', 'note': 'Eligible options are usually available until 13:15 (subject to exchange notice)'}, {'date_et': '2026-12-24', 'reason': 'Christmas Eve', 'close_time_et': '13:00', 'note': 'Eligible options are usually available until 13:15 (subject to exchange notice)'}]}
+    return {
+        'closed': {
+            '2026-01-01': 'New Year’s Day',
+            '2026-01-19': 'Martin Luther King, Jr. Day',
+            '2026-02-16': 'Presidents Day (Washington’s Birthday)',
+            '2026-04-03': 'Good Friday',
+            '2026-05-25': 'Memorial Day',
+            '2026-06-19': 'Juneteenth',
+            '2026-07-03': 'Independence Day (Observed)',
+            '2026-09-07': 'Labor Day',
+            '2026-11-26': 'Thanksgiving Day',
+            '2026-12-25': 'Christmas Day',
+        },
+        'early_close': {
+            '2026-11-27': {'reason': 'Day After Thanksgiving', 'close_time_et': '13:00'},
+            '2026-12-24': {'reason': 'Christmas Eve', 'close_time_et': '13:00'},
+        },
+    }
 
 def _ensure_trading_calendar(runtime: Dict[str, Any]) -> Dict[str, Any]:
-    cfg = _runtime_config(runtime)
-    cal = cfg.setdefault('trading_calendar', {})
-    cal.setdefault('exchange', 'XNYS')
-    cal.setdefault('timezone', _ET_TZ)
+    data = _runtime_data_config(runtime)
+    cal = data.setdefault('trading_calendar', {})
+    if not isinstance(cal, dict):
+        cal = {}
+        data['trading_calendar'] = cal
     years = cal.setdefault('years', {})
     years.setdefault('2026', _default_trading_calendar_2026())
-    cal.setdefault('source_refs', [{'title': 'NYSE Group holiday/early close calendar (2024-2026)', 'url': 'https://www.nasdaq.com/press-release/nyse-group-announces-2024-2025-and-2026-holiday-and-early-closings-calendar-2023-11'}, {'title': 'Nasdaq holiday schedule', 'url': 'https://www.nasdaq.com/'}])
     return cal
 
 def _is_weekend_et(d: date) -> bool:
     return d.weekday() >= 5
 
 def _closed_set_for_year_block(year_block: Dict[str, Any]) -> set:
-    s = set()
-    for item in year_block.get('full_day_closed') or []:
-        if isinstance(item, dict) and item.get('date_et'):
-            s.add(str(item['date_et']).strip())
-    return s
+    closed = year_block.get('closed')
+    if not isinstance(closed, dict):
+        return set()
+    return {
+        str(date_et).strip()
+        for date_et in closed.keys()
+        if str(date_et).strip()
+    }
 
 def _next_trading_day_et_from_states(runtime: Dict[str, Any], t_et: str) -> Optional[str]:
     t_et = str(t_et or '').strip()
     if not t_et:
         return None
     try:
-        cal = _runtime_config(runtime).get('trading_calendar') or {}
+        cal = config_trading_calendar(_runtime_config(runtime))
         years = cal.get('years') or {}
         d = date.fromisoformat(_to_yyyy_mm_dd(t_et))
         for _ in range(370):
@@ -258,7 +291,7 @@ def _prev_trading_day_et_from_states(runtime: Dict[str, Any], t_et: str) -> Opti
     if not t_et:
         return None
     try:
-        cal = _runtime_config(runtime).get('trading_calendar') or {}
+        cal = config_trading_calendar(_runtime_config(runtime))
         years = cal.get('years') or {}
         d = date.fromisoformat(_to_yyyy_mm_dd(t_et))
         for _ in range(370):
@@ -302,7 +335,7 @@ def _is_full_day_closed_et(runtime: Dict[str, Any], d: date) -> bool:
     if _is_weekend_et(d):
         return True
     try:
-        cal = _runtime_config(runtime).get('trading_calendar') or {}
+        cal = config_trading_calendar(_runtime_config(runtime))
         years = cal.get('years') or {}
         year_block = years.get(f'{d.year:04d}') or {}
         return d.isoformat() in _closed_set_for_year_block(year_block)
@@ -314,17 +347,18 @@ def _is_trading_day_et(runtime: Dict[str, Any], d: date) -> bool:
 
 def _close_time_et_from_states(runtime: Dict[str, Any], d: date) -> time:
     try:
-        cal = _runtime_config(runtime).get('trading_calendar') or {}
+        cal = config_trading_calendar(_runtime_config(runtime))
         years = cal.get('years') or {}
         year_block = years.get(f'{d.year:04d}') or {}
-        for item in year_block.get('early_close') or []:
-            if not isinstance(item, dict):
-                continue
-            if str(item.get('date_et') or '').strip() != d.isoformat():
-                continue
-            raw = str(item.get('close_time_et') or '').strip()
-            if not raw:
-                continue
+        early_close = year_block.get('early_close')
+        if not isinstance(early_close, dict):
+            return _DEFAULT_CLOSE_TIME_ET
+        payload = early_close.get(d.isoformat()) or {}
+        if isinstance(payload, dict):
+            raw = str(payload.get('close_time_et') or '').strip()
+        else:
+            raw = ''
+        if raw:
             parts = raw.split(':')
             hh = int(parts[0])
             mm = int(parts[1]) if len(parts) > 1 else 0
@@ -783,22 +817,7 @@ def _lookup_action_price_usd(states: Dict[str, Any], runtime: Dict[str, Any], ti
     return None
 
 def _discover_tickers_from_config(states: Dict[str, Any], runtime: Dict[str, Any]) -> List[str]:
-    cfg = _runtime_config(runtime)
-    buckets = cfg.get('buckets', {}) or {}
-    tickers: List[str] = []
-    tickers += list((buckets.get('core') or {}).get('tickers', []))
-    tickers += list((buckets.get('tactical') or {}).get('tickers', []))
-    cash_pool = (buckets.get('tactical') or {}).get('cash_pool_ticker')
-    if cash_pool:
-        tickers.append(str(cash_pool))
-    tickers += list((buckets.get('tactical_cash_pool') or {}).get('tickers', []))
-    tickers += list((cfg.get('tactical_indicators') or {}).keys())
-    for fx_cfg in ((cfg.get('fx_pairs') or {}).values()):
-        if not isinstance(fx_cfg, dict):
-            continue
-        fx_ticker = str(fx_cfg.get('ticker') or '').strip()
-        if fx_ticker:
-            tickers.append(fx_ticker)
+    tickers = discover_state_engine_tickers(_runtime_config(runtime))
     for p in (states.get('portfolio', {}) or {}).get('positions', []) or []:
         t = p.get('ticker')
         if t:
@@ -809,7 +828,7 @@ def _discover_tickers_from_config(states: Dict[str, Any], runtime: Dict[str, Any
 
 def _fx_tickers_from_config(runtime: Dict[str, Any]) -> set[str]:
     tickers: set[str] = set()
-    for fx_cfg in ((_runtime_config(runtime).get('fx_pairs') or {}).values()):
+    for fx_cfg in config_fx_pairs(_runtime_config(runtime)).values():
         if not isinstance(fx_cfg, dict):
             continue
         fx_ticker = str(fx_cfg.get('ticker') or '').upper().strip()
@@ -902,7 +921,7 @@ def _compute_keep_history_rows(states: Dict[str, Any], runtime: Dict[str, Any]) 
             except Exception:
                 pass
     cfg = _runtime_config(runtime)
-    for ma_rule in (cfg.get('tactical_indicators') or {}).values():
+    for ma_rule in config_tactical_indicators(cfg).values():
         w = _parse_indicator_window(ma_rule)
         if w:
             windows.append(w)
@@ -911,7 +930,7 @@ def _compute_keep_history_rows(states: Dict[str, Any], runtime: Dict[str, Any]) 
 
 def _resolve_csv_candidates(runtime: Dict[str, Any], csv_dir: str, ticker: str) -> List[str]:
     cfg = _runtime_config(runtime)
-    csv_sources = cfg.get('csv_sources', {}) or {}
+    csv_sources = config_csv_sources(cfg)
     src = None
     if isinstance(csv_sources.get(ticker), str):
         src = csv_sources.get(ticker)
@@ -1289,7 +1308,7 @@ def _sort_key_trade_for_portfolio(t: Dict[str, Any]) -> tuple:
 def _position_bucket_default(states: Dict[str, Any], runtime: Dict[str, Any], ticker: str) -> str:
     ticker = str(ticker or '').upper().strip()
     cfg = _runtime_config(runtime)
-    buckets_cfg = cfg.get('buckets', {}) or {}
+    buckets_cfg = config_buckets(cfg)
     core_tickers = {str(x).upper().strip() for x in ((buckets_cfg.get('core') or {}).get('tickers') or []) if str(x).strip()}
     tactical_tickers = {str(x).upper().strip() for x in ((buckets_cfg.get('tactical') or {}).get('tickers') or []) if str(x).strip()}
     tactical_cash_pool_ticker = str((buckets_cfg.get('tactical') or {}).get('cash_pool_ticker') or '').upper().strip()
@@ -1580,7 +1599,7 @@ def _run_main(args: argparse.Namespace) -> int:
     config_path = str(getattr(args, 'config', '') or '').strip() or str(Path(states_path).resolve().parent / 'config.json')
     runtime: Dict[str, Any] = {'config': _load_runtime_config(config_path), 'history': {}}
     numeric_precision = state_engine_numeric_precision(_runtime_config(runtime))
-    trades_file = str(getattr(args, 'trades_file', '') or (_runtime_config(runtime).get('trades_file') or 'trades.json')).strip() or 'trades.json'
+    trades_file = str(getattr(args, 'trades_file', '') or config_trades_file(_runtime_config(runtime)) or 'trades.json').strip() or 'trades.json'
     external_trades = _load_trades_payload(trades_file)
     trades: List[Dict[str, Any]] = external_trades if isinstance(external_trades, list) else []
     _migrate_state_schema(states)
