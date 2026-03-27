@@ -26,19 +26,45 @@ def _numeric_precision_overrides(**overrides: int) -> dict:
     return base
 
 
-def _backtest_config(*, commission_per_trade: float, slippage_bps: float, backtest_starting_cash: float, fee_rate: float, csv_sources: dict, tactical_indicators: dict, numeric_precision: dict | None = None) -> dict:
-    return {
-        "commission_per_trade": commission_per_trade,
-        "slippage_bps": slippage_bps,
-        "backtest_starting_cash": backtest_starting_cash,
+def _backtest_config(
+    *,
+    commission_per_trade: float,
+    slippage_bps: float,
+    backtest_starting_cash: float,
+    fee_rate: float,
+    csv_sources: dict,
+    tactical_indicators: dict,
+    numeric_precision: dict | None = None,
+    backtest_strategy: str | None = None,
+    mean_reversion_backtest: dict | None = None,
+    live_fee_rate: float | None = None,
+) -> dict:
+    payload = {
+        "backtest": {
+            "default_strategy": backtest_strategy or "tactical",
+            "starting_cash": backtest_starting_cash,
+            "costs": {
+                "fee_rate": fee_rate,
+                "commission_per_trade": commission_per_trade,
+                "slippage_bps": slippage_bps,
+            },
+            "tactical": {
+                "starting_cash": backtest_starting_cash,
+                "tickers": list(tactical_indicators.keys()),
+                "indicators": tactical_indicators,
+            },
+        },
         "state_engine": {
-            "fee_rate": fee_rate,
+            "fee_rate": fee_rate if live_fee_rate is None else live_fee_rate,
             "csv_sources": csv_sources,
             "buckets": {"tactical": {"tickers": list(tactical_indicators.keys())}},
             "tactical_indicators": tactical_indicators,
             "numeric_precision": numeric_precision or _numeric_precision_overrides(),
         },
     }
+    if mean_reversion_backtest is not None:
+        payload["backtest"]["mean_reversion"] = mean_reversion_backtest
+    return payload
 
 
 class BacktestTests(unittest.TestCase):
@@ -147,6 +173,7 @@ class BacktestTests(unittest.TestCase):
                         slippage_bps=0.0,
                         backtest_starting_cash=100.0,
                         fee_rate=0.01,
+                        live_fee_rate=0.0,
                         csv_sources={"AAA": "AAA.csv"},
                         tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
                     ),
@@ -318,6 +345,121 @@ class BacktestTests(unittest.TestCase):
 
             self.assertIn("| Total Return | -30.0% |", report_text)
             self.assertIn("| Tactical | $100.0 | $70.0 | -30.0% | $76.0 | -24.0% | -6.0% |", report_text)
+
+    def test_run_backtest_mean_reversion_uses_t_plus_1_mid_price_and_take_profit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_dir = root / "data"
+            csv_dir.mkdir()
+            (csv_dir / "AAA.csv").write_text(
+                "Date,Open,High,Low,Close,Volume\n"
+                "2026-01-01,100,100,100,100,100\n"
+                "2026-01-02,98,98,96,97,100\n"
+                "2026-01-05,96,99,95,98,100\n"
+                "2026-01-06,100,102,99,101,100\n"
+                "2026-01-07,102,104,101,104,100\n",
+                encoding="utf-8",
+            )
+            config_path = root / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    _backtest_config(
+                        commission_per_trade=0.0,
+                        slippage_bps=0.0,
+                        backtest_starting_cash=100.0,
+                        fee_rate=0.0,
+                        csv_sources={"AAA": "AAA.csv"},
+                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
+                        backtest_strategy="mean-reversion",
+                        mean_reversion_backtest={
+                            "tickers": ["AAA"],
+                            "entry_drawdown_pct": 0.02,
+                            "take_profit_pct": 0.02,
+                            "stop_loss_pct": 0.07,
+                            "starting_cash_per_ticker": 100.0,
+                        },
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_backtest(config_path=str(config_path), csv_dir=str(csv_dir), strategy="mean-reversion")
+
+            self.assertEqual(result["strategy"], "mean-reversion")
+            net_summary = result["net"]["summary"]
+            net_trades = result["net"]["trades"]
+            net_per_ticker = result["net"]["per_ticker"]
+
+            self.assertEqual(net_summary["trade_count"], 2)
+            self.assertEqual(net_summary["take_profit_sell_count"], 1)
+            self.assertEqual(net_summary["stop_loss_sell_count"], 0)
+            self.assertAlmostEqual(float(net_summary["ending_nav_usd"]), 106.0, places=4)
+            self.assertAlmostEqual(float(net_summary["profit_rate"]), 0.06, places=6)
+            self.assertEqual(len(net_per_ticker), 1)
+            self.assertEqual(net_per_ticker[0]["ticker"], "AAA")
+            self.assertAlmostEqual(float(net_per_ticker[0]["ending_nav_usd"]), 106.0, places=4)
+            self.assertAlmostEqual(float(net_per_ticker[0]["win_rate"]), 1.0, places=6)
+
+            self.assertEqual(net_trades[0]["side"], "BUY")
+            self.assertAlmostEqual(float(net_trades[0]["price"]), 97.0, places=4)
+            self.assertEqual(net_trades[1]["side"], "SELL")
+            self.assertAlmostEqual(float(net_trades[1]["price"]), 103.0, places=4)
+
+    def test_run_backtest_mean_reversion_stop_loss_uses_entry_price(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_dir = root / "data"
+            csv_dir.mkdir()
+            (csv_dir / "AAA.csv").write_text(
+                "Date,Open,High,Low,Close,Volume\n"
+                "2026-01-01,100,100,100,100,100\n"
+                "2026-01-02,98,98,96,97,100\n"
+                "2026-01-05,96,99,95,98,100\n"
+                "2026-01-06,89,90,88,89,100\n"
+                "2026-01-07,90,90,90,90,100\n",
+                encoding="utf-8",
+            )
+            config_path = root / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    _backtest_config(
+                        commission_per_trade=0.0,
+                        slippage_bps=0.0,
+                        backtest_starting_cash=100.0,
+                        fee_rate=0.0,
+                        csv_sources={"AAA": "AAA.csv"},
+                        tactical_indicators={"AAA": {"ma_type": "SMA", "window": 2}},
+                        backtest_strategy="mean-reversion",
+                        mean_reversion_backtest={
+                            "tickers": ["AAA"],
+                            "entry_drawdown_pct": 0.02,
+                            "take_profit_pct": 0.02,
+                            "stop_loss_pct": 0.07,
+                            "starting_cash_per_ticker": 100.0,
+                        },
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            out_dir = root / "out"
+
+            result = run_backtest(config_path=str(config_path), csv_dir=str(csv_dir), strategy="mean-reversion")
+            written = write_backtest_outputs(result, str(out_dir))
+            summary_payload = json.loads(Path(written["summary"]).read_text(encoding="utf-8"))
+            report_text = Path(written["report"]).read_text(encoding="utf-8")
+
+            net_summary = result["net"]["summary"]
+            self.assertEqual(net_summary["take_profit_sell_count"], 0)
+            self.assertEqual(net_summary["stop_loss_sell_count"], 1)
+            self.assertAlmostEqual(float(net_summary["ending_nav_usd"]), 93.0, places=4)
+            self.assertEqual(summary_payload["strategy"], "mean-reversion")
+            self.assertIn("per_ticker", summary_payload["net"])
+            self.assertIn("## Per Ticker (Net)", report_text)
+            self.assertIn("| AAA | $100.00 | $93.00 | -7.00% |", report_text)
 
 
 if __name__ == "__main__":

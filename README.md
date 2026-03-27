@@ -352,24 +352,62 @@ If a downloaded or local CSV row has incomplete OHLC values, the command fails b
 python3 backtest.py --config config.json --csv-dir data --out-dir backtest
 ```
 
-Purpose: simulate tactical strategy performance using historical OHLCV data.
+Purpose: simulate historical strategy performance using OHLCV data.
 
 Currently implemented rules:
 
-- tactical-only
+- supports `--strategy tactical` and `--strategy mean-reversion`
 - by default uses the most recent `252` trading days, plus the required warm-up window
 - supports `--lookback-trading-days`
 - supports `--start-date` and `--end-date`
-- initial capital defaults to top-level `backtest_starting_cash`, but can be overridden using `--starting-cash`
-- `BUY`, `BUY_MORE`, and `SELL_ALL` are all executed at `t+1`
+- tactical strategy initial capital defaults to `backtest.tactical.starting_cash`, but can be overridden using `--starting-cash`
+- mean-reversion strategy initial capital defaults to `backtest.mean_reversion.starting_cash_per_ticker`, but can be overridden using `--starting-cash` or `--mr-starting-cash-per-ticker`
+- all backtest fills are executed at `t+1`
 - the `t+1` execution price is `(Open(t+1) + Close(t+1)) / 2`
-- net results incorporate `fee_rate`, `commission_per_trade`, and `slippage_bps`
-- the markdown report lists total return, per-position return, and a comparison against a "buy-and-hold from initial date without selling" benchmark
+- net results incorporate `backtest.costs.fee_rate`, `backtest.costs.commission_per_trade`, and `backtest.costs.slippage_bps`
+- tactical markdown output compares strategy against a "buy-and-hold from initial date without selling" benchmark
+- mean-reversion markdown output lists aggregate results and per-ticker results without a benchmark section
+
+Backtest-specific parameters are grouped under `config.json.backtest`:
+
+- `default_strategy`
+- `lookback_trading_days`
+- `starting_cash`
+- `costs.fee_rate`
+- `costs.commission_per_trade`
+- `costs.slippage_bps`
+- `tactical.starting_cash`
+- `tactical.tickers`
+- `tactical.indicators`
+
+Mean-reversion parameters are stored under `config.json.backtest.mean_reversion`:
+
+- `entry_drawdown_pct`
+- `take_profit_pct`
+- `stop_loss_pct`
+- `starting_cash_per_ticker`
+- optional `tickers`
+
+The corresponding CLI overrides are:
+
+- `--mr-entry-pct`
+- `--mr-take-profit-pct`
+- `--mr-stop-loss-pct`
+- `--mr-starting-cash-per-ticker`
+- `--mr-tickers`
+
+Mean-reversion semantics:
+
+- each ticker is backtested independently
+- entry trigger uses `close(T) / close(day0) - 1 <= -entry_drawdown_pct`
+- take-profit trigger uses `close(T) / close(day0) - 1 >= take_profit_pct`
+- stop-loss trigger uses `close(T) / entry_price - 1 <= -stop_loss_pct`
+- after each actual fill, `day0` resets to the execution day `T+1` close
 
 Period and capital parameters:
 
 - `--starting-cash`
-  - overrides `backtest_starting_cash` from `config.json`
+  - overrides the strategy-specific starting cash from `config.json.backtest`
 - `--lookback-trading-days N`
   - when `--start-date` is not specified, backtests the most recent `N` trading days
   - if `--end-date` is also specified, that date is used as the backward anchor
@@ -696,13 +734,19 @@ You may also specify `--csv-dir` explicitly.
 python3 backtest.py --config config.json --csv-dir data --starting-cash 80000 --lookback-trading-days 120 --out-dir backtest_tactical
 ```
 
-### 12.10 Specify start and end dates and generate a markdown report
+### 12.10 Run the independent mean-reversion backtest
+
+```bash
+python3 backtest.py --config config.json --csv-dir data --strategy mean-reversion --lookback-trading-days 252 --out-dir backtest_mean_reversion
+```
+
+### 12.11 Specify start and end dates and generate a markdown report
 
 ```bash
 ./backtest_all_in_one.sh --starting-cash 80000 --start-date 2025-01-01 --end-date 2025-12-31 --out-dir backtest_2025
 ```
 
-### 12.11 Specify a custom log file path
+### 12.12 Specify a custom log file path
 
 ```bash
 python3 update_states.py --states states.json --out states.json --mode Premarket --csv-dir ./data --log-file logs/manual_premarket.log
@@ -719,7 +763,7 @@ python3 update_states.py --states states.json --out states.json --mode Premarket
 5. The report only displays current holdings with `shares > 0`.
 6. Importer-driven trade updates and cash-related updates may be executed without `--mode`. General report and scenario updates must include it.
 7. Standalone report generation always requires an explicit `--mode`.
-8. Backtest is currently tactical-only. Initial capital defaults to `backtest_starting_cash`, but can be overridden via `--starting-cash`.
+8. Backtest now supports both `tactical` and `mean-reversion`. Tactical defaults to `backtest.tactical.starting_cash`; mean-reversion defaults to `backtest.mean_reversion.starting_cash_per_ticker`, and both can be overridden from the CLI.
 9. Backtest can use `--lookback-trading-days`, or an explicit period via `--start-date` and `--end-date`.
 10. The backtest report lists both strategy results and the "buy-and-hold from initial date without selling" benchmark.
 11. If any result appears abnormal, inspect `logs/` first.
