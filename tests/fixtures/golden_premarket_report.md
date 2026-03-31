@@ -26,8 +26,10 @@
 | Cash Pool | - | - | - | - | $73.35 | - | - | - | - | - |
 | Portfolio Total | - | - | $31,811.38 | - | $31,515.80 | $-368.93 | -1,247.96 | -1.16% | -0.12% | - |
 
+Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the current price.
+
 ## Signal Status
-| Ticker | A: Close(t) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |
+| Ticker | A: Price (Now) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |
 | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: |
 | AAPL | 254.2300 | SMA50 | 261.9912 | 260.8300 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
 | AMZN | 215.2000 | SMA50 | 222.6984 | 214.3300 | FALSE | TRUE | FALSE | 0 | NO_ACTION | 0 |

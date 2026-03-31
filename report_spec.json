@@ -250,6 +250,9 @@
             }
           }
         }
+      ],
+      "after_lines": [
+        "Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the current price."
       ]
     },
     {
@@ -278,7 +281,7 @@
       },
       "columns": [
         { "header": "Ticker", "value": { "path": "ticker" } },
-        { "header": "A: Close(t)", "value": { "path": "close_t" }, "format": "p4", "align": "right" },
+        { "header": "A: Price (Now)", "value": { "path": "close_t" }, "format": "p4", "align": "right" },
         { "header": "MA Rule", "value": { "path": "ma_rule" } },
         { "header": "B: SMA(t)", "value": { "path": "ma_t" }, "format": "p4", "align": "right" },
         { "header": "C: Close(t-5)", "value": { "path": "close_t_minus_5" }, "format": "p4", "align": "right" },

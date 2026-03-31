@@ -453,7 +453,7 @@ This is the primary table for day-to-day decision-making.
 | Field                           | Meaning                      | Description                                   |
 | ------------------------------- | ---------------------------- | --------------------------------------------- |
 | Symbol                          | Ticker                       | For example, GOOG or NVDA                     |
-| A: Close(t)                     | Today's close                | Sourced from signals input                    |
+| A: Price (Now)                  | Price used by signal checks  | `Close(t)` in Premarket / AfterClose; current price in Intraday |
 | MA rule                         | Moving-average rule          | For example, SMA50 or SMA100                  |
 | B: SMA(t)                       | Current moving average value | Computed according to the rule for that stock |
 | C: Close(t-5)                   | Close 5 trading days ago     | Always participates in Buy evaluation         |

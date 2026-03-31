@@ -333,6 +333,20 @@ def render_grouped_trade_table(table_spec: Dict[str, Any], rows: List[Dict[str, 
         md_parts.append('')
     return '\n'.join(md_parts).rstrip() + '\n'
 
+
+def _render_table_after_lines(table_spec: Dict[str, Any], schema: Dict[str, Any], states: Dict[str, Any], null_display: str) -> List[str]:
+    rendered: List[str] = []
+    for item in table_spec.get('after_lines') or []:
+        fmt = item.get('format') if isinstance(item, dict) else None
+        value = eval_expr(item, {}, states) if isinstance(item, dict) else item
+        if value is None:
+            continue
+        text = format_value(value, fmt, schema, null_display) if fmt else str(value)
+        text = str(text).strip()
+        if text:
+            rendered.append(text)
+    return rendered
+
 def report_title_from_meta(states: Dict[str, Any], mode: str) -> str:
     meta = _effective_report_meta(states, mode)
     cfg = states.get('config', {}) or {}
@@ -393,5 +407,9 @@ def render_report(states: Dict[str, Any], schema: Dict[str, Any], mode: str) -> 
             lines.append(render_grouped_trade_table(t, rows, schema, states, null_display))
         else:
             lines.append(render_simple_table(t, rows, schema, states, null_display))
+        after_lines = _render_table_after_lines(t, schema, states, null_display)
+        if after_lines:
             lines.append('')
+            lines.extend(after_lines)
+        lines.append('')
     return '\n'.join(lines).rstrip() + '\n'

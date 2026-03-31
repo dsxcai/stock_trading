@@ -56,6 +56,44 @@ class ReportingSafetyTests(unittest.TestCase):
         self.assertIn("- Execution Basis: t+1=2026-03-18 (NYSE Trading Day)", markdown)
         self.assertIn("- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24.", markdown)
 
+    def test_render_report_renders_table_after_lines(self) -> None:
+        states = {
+            "config": {"meta": {"doc": "Daily Investment Report"}},
+            "_report_meta": {
+                "mode": "Intraday",
+                "mode_key": "intraday",
+                "signal_basis": {"t_et": "2026-03-25", "basis": "NYSE Intraday"},
+                "execution_basis": {"t_plus_1_et": "2026-03-26", "basis": "NYSE Trading Day"},
+                "version_anchor_et": "2026-03-25",
+            },
+            "portfolio": {"positions": [{"ticker": "AAA", "price_now": 110.0}]},
+        }
+        schema = {
+            "tables": [
+                {
+                    "title": "Current Positions",
+                    "dataset": "positions",
+                    "columns": [
+                        {"header": "Ticker", "value": {"path": "ticker"}},
+                        {"header": "Price (Now)", "value": {"path": "price_now"}},
+                    ],
+                    "after_lines": [
+                        "Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the current price."
+                    ],
+                }
+            ],
+            "datasets": {
+                "positions": {
+                    "row_source": {"path": "$.portfolio.positions[*]"},
+                }
+            },
+        }
+
+        markdown = reporting.render_report(states, schema, "Intraday")
+
+        self.assertIn("| Ticker | Price (Now) |", markdown)
+        self.assertIn("Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the current price.", markdown)
+
     def test_strip_persisted_report_transients_removes_by_mode(self) -> None:
         states = {
             "by_mode": {
