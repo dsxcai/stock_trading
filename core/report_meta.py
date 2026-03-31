@@ -46,14 +46,14 @@ def _effective_report_meta(states: Dict[str, Any], mode: Any) -> Dict[str, Any]:
         mode_key = _normalize_mode_key(mode)
         transient_mode_key = _normalize_mode_key(transient.get("mode_key") or transient.get("mode"))
         if not (transient_mode_key and mode_key and transient_mode_key != mode_key):
-            for key in ("signal_basis", "execution_basis", "version_anchor_et", "version", "price_notes"):
+            for key in ("signal_basis", "execution_basis", "version_anchor_et", "version", "price_notes", "generated_at_et"):
                 if key in transient:
                     eff[key] = transient.get(key)
             eff["mode"] = transient.get("mode") or str(mode or "").strip()
             return eff
     snap = _get_mode_snapshot(states, mode)
     if snap:
-        for key in ("signal_basis", "execution_basis", "version_anchor_et", "version", "price_notes"):
+        for key in ("signal_basis", "execution_basis", "version_anchor_et", "version", "price_notes", "generated_at_et"):
             if key in snap:
                 eff[key] = snap.get(key)
         eff["mode"] = snap.get("mode") or str(mode or "").strip()

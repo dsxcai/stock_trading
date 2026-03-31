@@ -43,6 +43,7 @@ class ReportingSafetyTests(unittest.TestCase):
             "_report_meta": {
                 "mode": "Premarket",
                 "mode_key": "premarket",
+                "generated_at_et": "2026-03-18T08:00:00-04:00",
                 "signal_basis": {"t_et": "2026-03-17", "basis": "NYSE Close"},
                 "execution_basis": {"t_plus_1_et": "2026-03-18", "basis": "NYSE Trading Day"},
                 "version_anchor_et": "2026-03-18",
@@ -52,6 +53,7 @@ class ReportingSafetyTests(unittest.TestCase):
         markdown = reporting.render_report(states, {"tables": []}, "Premarket")
 
         self.assertIn("# Daily Investment Report (Premarket)", markdown)
+        self.assertIn("- Generated At (ET): 2026/03/18 08:00:00", markdown)
         self.assertIn("- Signal Basis: t=2026-03-17 (NYSE Close)", markdown)
         self.assertIn("- Execution Basis: t+1=2026-03-18 (NYSE Trading Day)", markdown)
         self.assertIn("- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24.", markdown)
@@ -62,6 +64,7 @@ class ReportingSafetyTests(unittest.TestCase):
             "_report_meta": {
                 "mode": "Intraday",
                 "mode_key": "intraday",
+                "generated_at_et": "2026-03-25T10:30:00-04:00",
                 "signal_basis": {"t_et": "2026-03-25", "basis": "NYSE Intraday"},
                 "execution_basis": {"t_plus_1_et": "2026-03-26", "basis": "NYSE Trading Day"},
                 "version_anchor_et": "2026-03-25",
@@ -91,6 +94,7 @@ class ReportingSafetyTests(unittest.TestCase):
 
         markdown = reporting.render_report(states, schema, "Intraday")
 
+        self.assertIn("- Generated At (ET): 2026/03/25 10:30:00", markdown)
         self.assertIn("| Ticker | Price (Now) |", markdown)
         self.assertIn("Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the current price.", markdown)
 

@@ -171,6 +171,8 @@ class RegressionPipelineTests(unittest.TestCase):
                     "Premarket",
                     "--date",
                     "2026-03-18",
+                    "--now-et",
+                    FIXED_NOW_ET,
                     "--out",
                     "rendered_report.md",
                 ],

@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import traceback
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from core import reporting as runtime
 from core.report_meta import _migrate_state_schema, _normalize_mode_key
@@ -27,6 +29,8 @@ from utils.config_access import config_trades_file
 from utils.logger import configure_logging, emit, log_run_header
 from utils.precision import state_engine_numeric_precision
 
+_ET_TZ = "America/New_York"
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -42,6 +46,7 @@ def main() -> None:
     parser.add_argument("--allow-incomplete-csv-rows", action="store_true", help="Bypass incomplete OHLC rows by skipping them instead of failing")
     parser.add_argument("--derive-signals-inputs", default="force", choices=["never", "missing", "force"], help="How to derive transient signals inputs for report rendering")
     parser.add_argument("--derive-threshold-inputs", default="force", choices=["never", "missing", "force"], help="How to derive transient threshold inputs for report rendering")
+    parser.add_argument("--now-et", default="", help="Override current ET datetime for report generation metadata")
     parser.add_argument("--log-file", default="", help="Optional render log path")
     args = parser.parse_args()
 
@@ -66,7 +71,20 @@ def main() -> None:
         _ensure_trading_calendar(engine_runtime)
         _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
         _hydrate_positions_from_trade_ledger_if_needed(states, engine_runtime, trades)
-        report_meta = _resolve_runtime_report_meta(engine_runtime, args.mode, report_date=args.date)
+        now_et_raw = str(args.now_et or "").strip()
+        report_now_et = None
+        if now_et_raw:
+            report_now_et = datetime.fromisoformat(now_et_raw)
+            if report_now_et.tzinfo is None:
+                report_now_et = report_now_et.replace(tzinfo=ZoneInfo(_ET_TZ))
+            else:
+                report_now_et = report_now_et.astimezone(ZoneInfo(_ET_TZ))
+        report_meta = _resolve_runtime_report_meta(
+            engine_runtime,
+            args.mode,
+            report_date=args.date,
+            now_et=report_now_et,
+        )
         engine_runtime["report_meta"] = dict(report_meta)
         tickers = _discover_tickers_from_config(states, engine_runtime)
         keep_history_rows = _compute_keep_history_rows(states, engine_runtime)

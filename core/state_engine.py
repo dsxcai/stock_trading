@@ -426,7 +426,13 @@ def _resolve_report_context(states: Dict[str, Any], runtime: Dict[str, Any], mod
         return ReportContext(mode_label, mode_key, session, now_iso, today.isoformat(), t1, today.isoformat(), today.isoformat(), '', 'eod', False, 'afterclose requires a completed session close for t.', "current ET session is intraday, so today's close is not finalized yet.")
     raise ValueError(f'unsupported mode: {mode_label}')
 
-def _report_meta_from_mode_dates(mode_label: str, t_et: str, t_plus_1_et: Optional[str]) -> Dict[str, Any]:
+def _report_meta_from_mode_dates(
+    mode_label: str,
+    t_et: str,
+    t_plus_1_et: Optional[str],
+    *,
+    generated_at_et: str = "",
+) -> Dict[str, Any]:
     mode_key = _normalize_mode_key(mode_label)
     version_anchor_et = _version_anchor_day_et(mode_label, t_et, t_plus_1_et)
     meta = {
@@ -437,12 +443,26 @@ def _report_meta_from_mode_dates(mode_label: str, t_et: str, t_plus_1_et: Option
     }
     if version_anchor_et:
         meta['version_anchor_et'] = version_anchor_et
+    generated_at_value = str(generated_at_et or '').strip()
+    if generated_at_value:
+        meta['generated_at_et'] = generated_at_value
     return meta
 
 def _report_meta_from_context(ctx: ReportContext) -> Dict[str, Any]:
-    return _report_meta_from_mode_dates(ctx.mode_label, ctx.t_et, ctx.t_plus_1_et)
+    return _report_meta_from_mode_dates(
+        ctx.mode_label,
+        ctx.t_et,
+        ctx.t_plus_1_et,
+        generated_at_et=ctx.now_et_iso,
+    )
 
-def _report_meta_from_report_date(runtime: Dict[str, Any], mode_label: str, report_date: str) -> Dict[str, Any]:
+def _report_meta_from_report_date(
+    runtime: Dict[str, Any],
+    mode_label: str,
+    report_date: str,
+    *,
+    generated_at_et: str = "",
+) -> Dict[str, Any]:
     anchor_et = _to_yyyy_mm_dd(report_date)
     mode_key = _normalize_mode_key(mode_label)
     if mode_key == 'premarket':
@@ -451,14 +471,33 @@ def _report_meta_from_report_date(runtime: Dict[str, Any], mode_label: str, repo
     else:
         t_et = anchor_et
         t_plus_1_et = _next_trading_day_et_from_states(runtime, anchor_et) or anchor_et
-    return _report_meta_from_mode_dates(mode_label, t_et, t_plus_1_et)
+    return _report_meta_from_mode_dates(
+        mode_label,
+        t_et,
+        t_plus_1_et,
+        generated_at_et=generated_at_et,
+    )
 
-def _resolve_runtime_report_meta(runtime: Dict[str, Any], mode_label: str, report_date: str='') -> Dict[str, Any]:
+def _resolve_runtime_report_meta(
+    runtime: Dict[str, Any],
+    mode_label: str,
+    report_date: str='',
+    now_et: Optional[datetime] = None,
+) -> Dict[str, Any]:
     report_date = str(report_date or '').strip()
+    resolved_now_et = now_et.astimezone(ZoneInfo(_ET_TZ)) if isinstance(now_et, datetime) and now_et.tzinfo else now_et
+    if isinstance(resolved_now_et, datetime) and resolved_now_et.tzinfo is None:
+        resolved_now_et = resolved_now_et.replace(tzinfo=ZoneInfo(_ET_TZ))
+    if not isinstance(resolved_now_et, datetime):
+        resolved_now_et = datetime.now(ZoneInfo(_ET_TZ))
     if report_date:
-        return _report_meta_from_report_date(runtime, mode_label, report_date)
-    now_et = datetime.now(ZoneInfo(_ET_TZ))
-    return _report_meta_from_context(_resolve_report_context({}, runtime, mode_label, now_et))
+        return _report_meta_from_report_date(
+            runtime,
+            mode_label,
+            report_date,
+            generated_at_et=resolved_now_et.replace(microsecond=0).isoformat(),
+        )
+    return _report_meta_from_context(_resolve_report_context({}, runtime, mode_label, resolved_now_et))
 
 def _report_date_from_meta(meta: Dict[str, Any]) -> str:
     report_date = str(meta.get('version_anchor_et') or '').strip()

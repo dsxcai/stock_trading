@@ -576,7 +576,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | ----------------- | ------------------------------------------------------------ |
 | `--mode`          | Specify `Premarket`, `Intraday`, or `AfterClose`             |
 | `--render-report` | Generate the report in the same execution flow after update  |
-| `--now-et`        | Override the current ET timestamp for testing mode or session determination |
+| `--now-et`        | Override the current ET timestamp for testing mode/session determination and report generation metadata |
 | `-f`, `--force-mode`   | Bypass the ET/session check and run the requested `--mode` anyway |
 
 ### 10.3 Cash and performance

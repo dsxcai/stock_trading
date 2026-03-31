@@ -371,6 +371,16 @@ def report_date_default(states: Dict[str, Any], mode: str) -> str:
     dd = _parse_dateish(str(sb)) if sb else None
     return dd.strftime('%Y-%m-%d') if dd else datetime.now().strftime('%Y-%m-%d')
 
+
+def _format_generated_at_et(value: Any) -> str:
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    dt = _parse_dateish(raw)
+    if not dt:
+        return raw
+    return dt.strftime('%Y/%m/%d %H:%M:%S')
+
 def render_report(states: Dict[str, Any], schema: Dict[str, Any], mode: str) -> str:
     null_display = (schema.get('output') or {}).get('null_display') or '-'
     meta = _effective_report_meta(states, mode)
@@ -383,8 +393,11 @@ def render_report(states: Dict[str, Any], schema: Dict[str, Any], mode: str) -> 
     version = meta.get('version', '')
     sb = meta.get('signal_basis', {}) or {}
     eb = meta.get('execution_basis', {}) or {}
+    generated_at_et = _format_generated_at_et(meta.get('generated_at_et'))
     lines: List[str] = []
     lines.append(f'# {report_title_from_meta(states, mode)}')
+    if generated_at_et:
+        lines.append(f'- Generated At (ET): {generated_at_et}')
     if version:
         lines.append('')
         lines.append(f'- Version: {version}')
