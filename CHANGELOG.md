@@ -8,6 +8,35 @@ The format is inspired by Keep a Changelog, and this project uses semantic versi
 
 - No unreleased changes yet.
 
+## [1.2] - 2026-04-03
+
+### Breaking changes
+- None.
+
+### Added
+- Local GUI dashboard entrypoint via `python3 gui_app.py --open-browser`.
+- Recent report picker with rendered Markdown and raw Markdown views.
+- GUI controls for daily mode runs, report generation, Capital XLS import, tactical SMA config editing, and local server restart/stop.
+- Status-panel log rendering with inline error highlighting for failed GUI operations.
+- Report header timestamp output: `Generated At (ET)`.
+- Tactical signal coverage expansion with additional tracked stocks.
+- GUI-focused test coverage for report selection, raw view rendering, importer wiring, and server controls.
+
+### Changed
+- Report pricing labels now use `Price (Now)` consistently, including the signal table alias and current-position note wording.
+- Mode-based market refresh now updates active CSVs through the current ET date, with same-day handling for FX and intraday equities.
+- CSV refresh fails on incomplete OHLC rows by default; `--allow-incomplete-csv-rows` can be used to bypass incomplete rows intentionally.
+- Added `--force-mode` override handling for explicit mode execution.
+- Split backtest configuration from live runtime configuration and refactored the config schema around that separation.
+- Repository history no longer tracks `states.json` and `trades.json`; both files are now local-only runtime artifacts ignored by git.
+
+### Fixed
+- Imported portfolio rebuild behavior and totals rounding consistency.
+- Current-position notes now derive from surviving FIFO lots instead of stale persisted notes.
+- Market snapshot rebuild now follows active tickers more reliably for reporting and refresh flows.
+- GUI import execution now uses the module entrypoint correctly, avoiding local import-path failures.
+- Raw Markdown report view in the GUI now renders with readable text styling.
+
 ## [1.1] - 2026-03-20
 
 ### Added
