@@ -37,6 +37,8 @@ MANIFEST
 logs/**
 report/**
 data/**
+/states.json
+/trades.json
 
 # SQLite / local databases
 *.sqlite3
@@ -48,6 +50,5 @@ data/**
 
 # PEP 582
 __pypackages__/
-
 
 /config.json
