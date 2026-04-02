@@ -9,7 +9,188 @@ The purpose of this document is as follows:
 
 ------
 
-## 1. Core operation of the strategy
+## 1. Local GUI
+
+The project now includes a local GUI for routine operation. It is a Python application that serves a local browser-based dashboard, so day-to-day workflows can be executed without typing the underlying commands manually.
+
+### 1.1 Start the GUI
+
+Recommended:
+
+```bash
+python3 gui_app.py --open-browser
+```
+
+If you prefer to launch the server without auto-opening a browser tab:
+
+```bash
+python3 gui_app.py
+```
+
+The GUI starts a local HTTP server and opens the dashboard on the configured host and port.
+
+### 1.2 What the GUI currently covers
+
+The main screen currently supports the following:
+
+- auto-load the latest available report when the page opens, then let you switch from `Recent Reports`
+- run `Premarket`, `Intraday`, and `AfterClose`
+- optionally enable `Allow force mode`
+- optionally enable `Allow incomplete CSV rows`
+- generate a report for a selected mode and report date
+- import Capital XLS trade history with `replace` or `append`
+- regenerate the currently selected report automatically after imports or config changes when the target report can be identified
+- edit `state_engine.strategy.tactical.indicators` in `config.json`
+- select recent markdown reports and switch between rendered markdown and raw markdown
+- inspect the latest operation status and highlighted error output
+- restart or stop the local GUI server from the GUI itself
+
+### 1.3 Main screen layout
+
+The GUI is split into two areas:
+
+- left side: operational controls such as Daily Run, Generate Report, Import Trades, Signal Config, and Recent Reports
+- right side: the main viewer, with `Report` and `Status` tabs
+
+The `Report` tab renders the selected markdown report directly in the GUI. The `Status` tab shows the latest operation result, including the report path, log path, exit code, and captured log output. If an operation fails, error lines are highlighted in red.
+
+### 1.4 Current GUI limitations
+
+The current GUI is intentionally focused on routine workflows. A few tasks are still better handled from the CLI:
+
+- initializing an empty runtime directory from scratch still requires creating the local runtime files once
+- direct cash-only operations such as `--initial-investment-usd`, `--cash-adjust-usd`, and `--cash-transfer-to-reserve-usd` are not yet exposed in the GUI
+- broker reconciliation arguments such as `--broker-investment-total-usd` are still CLI-first
+- the GUI operates on the same local `config.json`, `states.json`, `trades.json`, `data/`, and `report/` files as the CLI
+
+### 1.5 Recommended daily usage flow
+
+For routine use, the intended order is:
+
+1. Start the GUI.
+2. Review the auto-loaded latest report, or switch to another one from `Recent Reports`.
+3. Run `Premarket`, `Intraday`, or `AfterClose` as needed.
+4. If you imported new broker trades, use `Import Trades` and let the GUI regenerate the current report automatically.
+5. Review the result in `Report` and check `Status` if anything looks abnormal.
+
+------
+
+## 2. How to initialize a portfolio and current positions
+
+This section describes how to bootstrap local runtime state when you want the system to start from an existing broker portfolio rather than from incremental daily updates.
+
+### 2.1 What is actually being initialized
+
+Initialization is centered on two local runtime files:
+
+- `states.json`: persistent portfolio state such as holdings quantities, cash buckets, and performance basis
+- `trades.json`: the transaction ledger used to rebuild holdings and FIFO cost basis
+
+The current positions shown in reports are not entered manually as a separate source of truth. Instead, they are rebuilt from the trade ledger. In practice, the cleanest bootstrap is:
+
+1. prepare a complete local trade history
+2. import it with `replace`
+3. let the system rebuild positions from that ledger
+
+### 2.2 Prepare the local runtime files if you are starting from zero
+
+`update_states.py` expects the state file to exist. If this is a brand-new local setup, create the runtime files once:
+
+```bash
+printf '{}\n' > states.json
+printf '[]\n' > trades.json
+```
+
+Also confirm that the following project files and directories already exist and are correct for your environment:
+
+- `config.json`
+- `data/`
+- `report_spec.json`
+
+### 2.3 Recommended path: initialize from a full Capital XLS export in the GUI
+
+This is the simplest path when your broker export is available as Capital Securities `OSHistoryDealAll.xls`.
+
+1. Start the GUI with `python3 gui_app.py --open-browser`.
+2. Open the `Import Trades` panel.
+3. Upload the full broker export, or provide its local file path.
+4. Keep `Import Mode` as `replace` for the first bootstrap.
+5. Submit the import.
+6. Review the `Status` tab for success, then inspect the regenerated report.
+
+For a first-time bootstrap, do not use a partial XLS export. Use the full available trading history so the rebuilt holdings, share counts, and FIFO lots match the broker ledger.
+
+### 2.4 Equivalent CLI path: initialize from a full Capital XLS export
+
+If you prefer the CLI, the equivalent bootstrap command is:
+
+```bash
+./update_xml.sh /path/to/OSHistoryDealAll.xls \
+  --states states.json \
+  --out states.json \
+  --config config.json \
+  --trades-file trades.json \
+  --trades-import-mode replace
+```
+
+This converts the Capital XLS export into normalized trades and then rebuilds `trades.json` and `states.json` from that imported ledger.
+
+### 2.5 Alternative CLI path: initialize from a normalized imported trades JSON
+
+If you already have normalized imported trades JSON from another source, you can bootstrap directly through `update_states.py`:
+
+```bash
+python3 update_states.py \
+  --states states.json \
+  --out states.json \
+  --config config.json \
+  --trades-file trades.json \
+  --imported-trades-json /path/to/imported_trades.json \
+  --trades-import-mode replace
+```
+
+Use this path only if the imported JSON already follows the system's normalized trade schema.
+
+### 2.6 Set the initial investment baseline if you want return metrics
+
+If you want profit and return calculations in the report to reflect your intended baseline, record the initial investment amount explicitly:
+
+```bash
+python3 update_states.py \
+  --states states.json \
+  --out states.json \
+  --config config.json \
+  --trades-file trades.json \
+  --initial-investment-usd 100000
+```
+
+This step is optional for position reconstruction, but recommended if you want `profit_usd` and `profit_rate` to be meaningful from day one.
+
+### 2.7 Generate the first report and validate the rebuild
+
+After the trade ledger has been imported, generate a report and validate the rebuilt portfolio:
+
+```bash
+python3 generate_report.py \
+  --states states.json \
+  --config config.json \
+  --trades-file trades.json \
+  --schema report_spec.json \
+  --mode Premarket \
+  --out-dir report
+```
+
+Check the following before you trust the initialized portfolio:
+
+- current positions match the broker's share quantities
+- tickers introduced by the imported ledger are present in the report
+- current-position notes reflect the surviving FIFO lots you expect
+- cash buckets and total assets are plausible
+- no missing-price or incomplete-CSV errors appear in the generated status log
+
+------
+
+## 3. Core operation of the strategy
 
 The system performs four tasks each day:
 
@@ -38,16 +219,16 @@ A Buy signal is considered valid only when both conditions are satisfied.
 
 ------
 
-## 2. How buy, sell, and add-on decisions are made
+## 4. How buy, sell, and add-on decisions are made
 
-### 2.1 Buy rule
+### 4.1 Buy rule
 
 A stock becomes eligible for purchase if both of the following conditions hold:
 
 - `Close(t) > MA(t)`
 - `Close(t) > Close(t-5)`
 
-### 2.2 Sell rule
+### 4.2 Sell rule
 
 If a tactical stock is currently held, but its Buy signal is no longer valid, the system action is:
 
@@ -55,7 +236,7 @@ If a tactical stock is currently held, but its Buy signal is no longer valid, th
 
 At present, the strategy does not support partial reductions or staged exits. Once the signal fails, the entire tactical position is exited.
 
-### 2.3 Add-on rule
+### 4.3 Add-on rule
 
 As long as a stock has a valid Buy signal, it participates in the current capital allocation cycle, regardless of whether it is:
 
@@ -70,7 +251,7 @@ Accordingly, three positive actions may result:
 
 ------
 
-## 3. How cash is partitioned: deployable cash vs reserve cash
+## 5. How cash is partitioned: deployable cash vs reserve cash
 
 The system divides cash into two categories:
 
@@ -85,7 +266,7 @@ Total cash is always defined as:
 cash.usd = deployable_usd + reserve_usd
 ```
 
-### 3.1 Which funds go into deployable cash
+### 5.1 Which funds go into deployable cash
 
 The following cash flows are routed to `deployable_usd` by default:
 
@@ -95,7 +276,7 @@ The following cash flows are routed to `deployable_usd` by default:
 
 These funds are therefore treated, by default, as capital available for redeployment into the market.
 
-### 3.2 What reserve cash means
+### 5.2 What reserve cash means
 
 `reserve_usd` is cash intentionally set aside and excluded from the next buy cycle.
 
@@ -105,7 +286,7 @@ It:
 - is still included in NAV
 - does not participate in tactical buy allocation
 
-### 3.3 Internal transfers: deployable cash <-> reserve cash
+### 5.3 Internal transfers: deployable cash <-> reserve cash
 
 The following parameter may be used:
 
@@ -125,7 +306,7 @@ Examples:
 - `--cash-transfer-to-reserve-usd -3000`
   means transferring USD 3,000 of reserve cash back into deployable cash
 
-### 3.4 Safety checks
+### 5.4 Safety checks
 
 The system performs boundary checks:
 
@@ -142,9 +323,9 @@ In other words, the entire run is rolled back to its pre-execution state.
 
 ------
 
-## 4. How share quantities are allocated for purchases
+## 6. How share quantities are allocated for purchases
 
-### 4.1 Which stocks are included in the current allocation round
+### 6.1 Which stocks are included in the current allocation round
 
 A stock enters the set of buy candidates if:
 
@@ -156,7 +337,7 @@ This includes:
 - stocks not currently held, representing new entries
 - stocks already held, representing add-on allocations
 
-### 4.2 Which cash bucket is used
+### 6.2 Which cash bucket is used
 
 Only the following cash bucket is used in the current purchase allocation round:
 
@@ -173,7 +354,7 @@ investable_cash_usd = investable_cash_base_usd + estimated_sell_reclaim_usd
 
 This estimate is used only for purchase allocation within the current round.
 
-### 4.3 Allocation flow
+### 6.3 Allocation flow
 
 The allocation logic for `BUY` and `BUY_MORE` does not use `Close(t)` directly. Instead, the per-share purchase cost is scaled to include fees:
 
@@ -213,9 +394,9 @@ This is intended to utilize `deployable_usd` as efficiently as possible.
 
 ------
 
-## 5. How `mode`, snapshots, and `states.json` are now separated
+## 7. How `mode`, snapshots, and `states.json` are now separated
 
-### 5.1 `states.json` no longer stores the selector
+### 7.1 `states.json` no longer stores the selector
 
 `states.json` no longer stores selector-style fields such as:
 
@@ -225,7 +406,7 @@ This is intended to utilize `deployable_usd` as efficiently as possible.
 
 That means the state file no longer persists which mode is currently active.
 
-### 5.1.1 Responsibility split among `states.json`, `config.json`, and `trades.json`
+### 7.1.1 Responsibility split among `states.json`, `config.json`, and `trades.json`
 
 Trade details are now externalized into `trades.json` by default:
 
@@ -246,7 +427,7 @@ Numeric rounding policy is fully configuration-owned as well. `state_engine.repo
 - `state_selected_fields` for persisted rounded fields in `states.json`
 - `backtest_amount`, `backtest_price`, `backtest_rate`, and `backtest_cost_param` for backtest output
 
-### 5.2 Mode context is derived at runtime
+### 7.2 Mode context is derived at runtime
 
 Mode-specific report context is no longer persisted in `states.json`.
 
@@ -273,7 +454,7 @@ Likewise, `signals`, `thresholds`, `market.signals_inputs`, and `market.next_clo
 
 Derived fields such as market prices, totals, signals, thresholds, and per-mode report content are not persisted in `states.json`. Runtime performance outputs such as current total assets and profit are recomputed from the persistent basis plus the latest `trades.json` and `data/*.csv`, then written into `report/<DATE>_<mode>.json` for each mode run.
 
-### 5.3 Why all reports now require an explicit `--mode`
+### 7.3 Why all reports now require an explicit `--mode`
 
 Because the state no longer stores the selector or mode snapshot, any path that generates a report must explicitly specify:
 
@@ -287,9 +468,9 @@ The report will then derive the corresponding runtime context directly rather th
 
 ------
 
-## 6. How to use the main entry points
+## 8. How to use the main CLI entry points
 
-### 6.1 Premarket
+### 8.1 Premarket
 
 ```bash
 ./premarket.sh
@@ -299,7 +480,7 @@ Purpose: update the state before market open and generate the premarket report.
 Current-position USD prices and signal inputs stay on the prior NYSE close. `Unrealized PnL (TWD)` still uses the latest available USD/TWD CSV quote and the report marks that as `Estimated Price`.
 This entry point does not rewrite the primary `states.json`. It writes `report/<DATE>_premarket.json` and renders the markdown report from that snapshot.
 
-### 6.2 Intraday
+### 8.2 Intraday
 
 ```bash
 ./intraday.sh
@@ -309,7 +490,7 @@ Purpose: update the state during market hours and generate the intraday report.
 If a same-day CSV row is available, `Current Positions` and `Signal Status` use that same-day price in Intraday mode, and the report marks it as `Estimated Price`.
 This entry point does not rewrite the primary `states.json`. It writes `report/<DATE>_intraday.json` and renders the markdown report from that snapshot.
 
-### 6.3 AfterClose
+### 8.3 AfterClose
 
 ```bash
 ./afterclose.sh
@@ -318,7 +499,7 @@ This entry point does not rewrite the primary `states.json`. It writes `report/<
 Purpose: update the state after market close and generate the after-close report.
 This entry point does not rewrite the primary `states.json`. It writes `report/<DATE>_afterclose.json` and renders the markdown report from that snapshot.
 
-### 6.4 Capital XLS extension import
+### 8.4 Capital XLS extension import
 
 ```bash
 ./update_xml.sh <capital-xls-path> [extra update_states args...]
@@ -333,7 +514,7 @@ This entry point:
 - if `--csv-dir` is omitted, price CSV files are automatically loaded from `./data`
 - preserves `update_states.py` import behavior: default is `append`, and only `--trades-import-mode replace` triggers replace mode
 
-### 6.5 Generate a report only
+### 8.5 Generate a report only
 
 ```bash
 python3 generate_report.py --states states.json --trades-file trades.json --schema report_spec.json --mode Premarket
@@ -346,7 +527,7 @@ When `update_states.py` is run with `--mode`, it now attempts an automatic CSV r
 If the input `states.json` is compact, the command reconstructs derived position fields such as bucket and FIFO cost basis from `trades.json` before loading CSV market data.
 If a downloaded or local CSV row has incomplete OHLC values, the command fails by default. Use `--allow-incomplete-csv-rows` only when you intentionally want to bypass that failure and skip incomplete rows.
 
-### 6.6 Tactical simulation / backtest
+### 8.6 Tactical simulation / backtest
 
 ```bash
 python3 backtest.py --config backtest_config.json --csv-dir data --out-dir backtest
@@ -367,6 +548,21 @@ Currently implemented rules:
 - net results incorporate `backtest.costs.fee_rate`, `backtest.costs.commission_per_trade`, and `backtest.costs.slippage_bps`
 - tactical markdown output compares strategy against a "buy-and-hold from initial date without selling" benchmark
 - mean-reversion markdown output lists aggregate results and per-ticker results without a benchmark section
+
+### 8.6.1 All-in-one shell script
+
+```bash
+./backtest_all_in_one.sh --starting-cash 100000 --start-date 2025-03-01 --end-date 2026-03-01 --out-dir backtest_phase2
+```
+
+This script performs more than report generation alone. It will:
+
+1. accept the provided parameters
+2. run the backtest simulation
+3. output `summary`, `equity_curve`, and `trades`
+4. generate `report.md` at the end
+
+If `--out-dir` is not specified, the system automatically creates a timestamped directory.
 
 Backtest-specific parameters are grouped under `backtest_config.json.backtest`:
 
@@ -427,26 +623,11 @@ Output files:
 - `net_trades.json`
 - `report.md`
 
-### 6.6.1 All-in-one shell script
-
-```bash
-./backtest_all_in_one.sh --starting-cash 100000 --start-date 2025-03-01 --end-date 2026-03-01 --out-dir backtest_phase2
-```
-
-This script performs more than report generation alone. It will:
-
-1. accept the provided parameters
-2. run the backtest simulation
-3. output `summary`, `equity_curve`, and `trades`
-4. generate `report.md` at the end
-
-If `--out-dir` is not specified, the system automatically creates a timestamped directory.
-
 ------
 
-## 7. How to read the report
+## 9. How to read the report
 
-### 7.1 Buy and sell trigger status table
+### 9.1 Buy and sell trigger status table
 
 This is the primary table for day-to-day decision-making.
 
@@ -464,7 +645,7 @@ This is the primary table for day-to-day decision-making.
 | t+1 action                      | Recommended next action      | BUY, BUY_MORE, HOLD, SELL_ALL, or NO_ACTION   |
 | Action shares                   | Recommended order quantity   | 0 if no action is needed                      |
 
-### 7.2 How `A>B` is computed
+### 9.2 How `A>B` is computed
 
 When:
 
@@ -474,7 +655,7 @@ A > B
 
 the field is shown as `TRUE`; otherwise `FALSE`.
 
-### 7.2.1 How `A>C` is computed
+### 9.2.1 How `A>C` is computed
 
 When:
 
@@ -484,7 +665,7 @@ A > C
 
 the field is shown as `TRUE`; otherwise `FALSE`.
 
-### 7.3 Final determination of the Buy signal
+### 9.3 Final determination of the Buy signal
 
 ```text
 buy_signal = (Close(t) > MA(t)) and (Close(t) > Close(t-5))
@@ -500,9 +681,9 @@ If Sell is true, then `t+1_action = SELL_ALL`.
 
 ------
 
-## 8. How other report fields are computed
+## 10. How other report fields are computed
 
-### 8.1 Current position status table
+### 10.1 Current position status table
 
 The report only displays stocks with `shares > 0`.
 
@@ -514,13 +695,13 @@ Positions that have been fully sold are now removed directly from `portfolio.pos
 | Unrealized PnL     | `market_value_usd - cost_usd`                       |
 | Unrealized percent | `unrealized_pnl_usd / cost_usd`, blank if cost is 0 |
 
-### 8.2 Total assets and NAV
+### 10.2 Total assets and NAV
 
 ```text
 portfolio.nav_usd = total market value of all holdings + deployable_usd + reserve_usd
 ```
 
-### 8.3 Return rate
+### 10.3 Return rate
 
 If an initial invested amount has been defined:
 
@@ -532,17 +713,17 @@ profit_rate = profit_usd / effective_capital_base_usd
 
 ------
 
-## 9. Capital XLS extension behavior and new ticker handling
+## 11. Capital XLS extension behavior and new ticker handling
 
-### 9.1 Capital XLS extension can run without `--mode`
+### 11.1 Capital XLS extension can run without `--mode`
 
 This is intentionally supported because the extension ultimately feeds normalized trades into the core update flow, which can update trades, cash, and positions without recomputing a report mode.
 
-### 9.2 If Capital XLS import introduces a new ticker, the system automatically creates the position
+### 11.2 If Capital XLS import introduces a new ticker, the system automatically creates the position
 
 If the Capital XLS export contains a new buy for a stock that does not already exist in `portfolio.positions`, the system automatically creates that ticker entry.
 
-### 9.3 CSV loading and price hydration happen within the same execution
+### 11.3 CSV loading and price hydration happen within the same execution
 
 As long as `./data/<TICKER>.csv` exists, the system will complete the following within the same Capital XLS import run:
 
@@ -554,9 +735,9 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 
 ------
 
-## 10. Frequently used parameters
+## 12. Frequently used parameters
 
-### 10.1 Data and output
+### 12.1 Data and output
 
 | Parameter         | Purpose                                                      |
 | ----------------- | ------------------------------------------------------------ |
@@ -570,7 +751,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | `--report-out`    | Directly specify the report output filename                  |
 | `--log-file`      | Specify the log file; if omitted, a file is automatically created under `logs/` |
 
-### 10.2 Mode and reporting
+### 12.2 Mode and reporting
 
 | Parameter         | Purpose                                                      |
 | ----------------- | ------------------------------------------------------------ |
@@ -579,7 +760,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | `--now-et`        | Override the current ET timestamp for testing mode/session determination and report generation metadata |
 | `-f`, `--force-mode`   | Bypass the ET/session check and run the requested `--mode` anyway |
 
-### 10.3 Cash and performance
+### 12.3 Cash and performance
 
 | Parameter                        | Purpose                                                      |
 | -------------------------------- | ------------------------------------------------------------ |
@@ -589,7 +770,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | `--cash-transfer-to-reserve-usd` | Perform internal transfer between deployable and reserve cash |
 | `--tactical-cash-usd`            | Reconcile tactical cash using broker cash snapshot           |
 
-### 10.4 Reconciliation and validation
+### 12.4 Reconciliation and validation
 
 | Parameter                        | Purpose                                      |
 | -------------------------------- | -------------------------------------------- |
@@ -597,7 +778,7 @@ Accordingly, no second run is required. A newly imported ticker can be valued im
 | `--broker-investment-total-kind` | Reconcile against cost basis or market value |
 | `--verify-tolerance-usd`         | Reconciliation tolerance                     |
 
-### 10.5 Trade import
+### 12.5 Trade import
 
 | Parameter              | Purpose               |
 | ---------------------- | --------------------- |
@@ -611,7 +792,7 @@ When `states.json` is saved, holdings are persisted as share quantities while ca
 Current-position notes shown in reports are derived from the surviving FIFO lots behind each holding, aggregating the unique non-empty trade notes that still compose the remaining shares and appending the remaining share count for each note, such as `AA x2 | BB x7`. They are not persisted in `portfolio.positions`.
 The `Current Positions` table also includes `Unrealized PnL (TWD)` and `Unrealized PnL % (TWD)`. They are computed only at report-build time by converting each surviving FIFO buy lot with the USD/TWD close on or before its buy date, then comparing that TWD cost basis with the current position market value translated by the latest available USD/TWD CSV quote. In Premarket mode the report marks that FX translation as `Estimated Price` whenever the FX quote is newer than the prior-close signal basis day.
 
-### 10.6 When `--mode` is mandatory
+### 12.6 When `--mode` is mandatory
 
 - general daily update, signal recomputation, or report generation: required
 - `--render-report`: must be used together with `--mode`
@@ -628,9 +809,9 @@ If `--mode` is present but the current ET session does not normally allow that m
 
 ------
 
-## 11. How log files work
+## 13. How log files work
 
-### 11.1 `update_states.py` writes logs automatically
+### 13.1 `update_states.py` writes logs automatically
 
 If `--log-file` is not explicitly specified, the system automatically creates:
 
@@ -638,7 +819,7 @@ If `--log-file` is not explicitly specified, the system automatically creates:
 logs/update_states_<timestamp>_<pid>.log
 ```
 
-### 11.2 `generate_report.py` also writes logs automatically
+### 13.2 `generate_report.py` also writes logs automatically
 
 If `--log-file` is not explicitly specified, the system automatically creates:
 
@@ -646,7 +827,7 @@ If `--log-file` is not explicitly specified, the system automatically creates:
 logs/generate_report_<timestamp>_<pid>.log
 ```
 
-### 11.3 Contents of the logs
+### 13.3 Contents of the logs
 
 The log contains sufficient data for troubleshooting, for example:
 
@@ -660,7 +841,7 @@ The log contains sufficient data for troubleshooting, for example:
 - report output path
 - traceback
 
-### 11.4 When the logs should be inspected
+### 13.4 When the logs should be inspected
 
 Logs should be reviewed first in situations such as the following:
 
@@ -672,9 +853,9 @@ Logs should be reviewed first in situations such as the following:
 
 ------
 
-## 12. Routine operation examples
+## 14. Routine operation examples
 
-### 12.1 Standard premarket update
+### 14.1 Standard premarket update
 
 ```bash
 ./premarket.sh
@@ -682,43 +863,43 @@ Logs should be reviewed first in situations such as the following:
 
 A routine daily update of this kind always includes `--mode`, and updates both the snapshot and the report for that mode.
 
-### 12.2 Premarket update and move USD 3,000 into reserve cash
+### 14.2 Premarket update and move USD 3,000 into reserve cash
 
 ```bash
 ./premarket.sh --cash-transfer-to-reserve-usd 3000
 ```
 
-### 12.3 Move USD 1,500 of reserve cash back into deployable cash
+### 14.3 Move USD 1,500 of reserve cash back into deployable cash
 
 ```bash
 ./premarket.sh --cash-transfer-to-reserve-usd -1500
 ```
 
-### 12.4 After-close update and reconcile broker total holdings
+### 14.4 After-close update and reconcile broker total holdings
 
 ```bash
 ./afterclose.sh --broker-investment-total-usd 40490.18
 ```
 
-### 12.5 Import Capital XLS only, without `--mode`
+### 14.5 Import Capital XLS only, without `--mode`
 
 ```bash
 ./update_xml.sh data/OSHistoryDealAll.xls
 ```
 
-### 12.6 Record an external deposit or withdrawal only, without `--mode`
+### 14.6 Record an external deposit or withdrawal only, without `--mode`
 
 ```bash
 python3 update_states.py --states states.json --out states.json --cash-adjust-usd 2000 --cash-adjust-note "top up"
 ```
 
-### 12.7 Perform deployable and reserve transfer only, without `--mode`
+### 14.7 Perform deployable and reserve transfer only, without `--mode`
 
 ```bash
 python3 update_states.py --states states.json --out states.json --cash-transfer-to-reserve-usd 1500
 ```
 
-### 12.8 Generate a report for a specific mode only
+### 14.8 Generate a report for a specific mode only
 
 ```bash
 python3 generate_report.py --states states.json --schema report_spec.json --mode Intraday --out-dir report
@@ -728,25 +909,25 @@ If `states.json` is already a reduced snapshot, this command automatically loads
 
 You may also specify `--csv-dir` explicitly.
 
-### 12.9 Run a tactical simulation
+### 14.9 Run a tactical simulation
 
 ```bash
 python3 backtest.py --config backtest_config.json --csv-dir data --starting-cash 80000 --lookback-trading-days 120 --out-dir backtest_tactical
 ```
 
-### 12.10 Run the independent mean-reversion backtest
+### 14.10 Run the independent mean-reversion backtest
 
 ```bash
 python3 backtest.py --config backtest_config.json --csv-dir data --strategy mean-reversion --lookback-trading-days 252 --out-dir backtest_mean_reversion
 ```
 
-### 12.11 Specify start and end dates and generate a markdown report
+### 14.11 Specify start and end dates and generate a markdown report
 
 ```bash
 ./backtest_all_in_one.sh --starting-cash 80000 --start-date 2025-01-01 --end-date 2025-12-31 --out-dir backtest_2025
 ```
 
-### 12.12 Specify a custom log file path
+### 14.12 Specify a custom log file path
 
 ```bash
 python3 update_states.py --states states.json --out states.json --mode Premarket --csv-dir ./data --log-file logs/manual_premarket.log
@@ -754,7 +935,7 @@ python3 update_states.py --states states.json --out states.json --mode Premarket
 
 ------
 
-## 13. Key operational points
+## 15. Key operational points
 
 1. The core Buy signal is: price above the moving average, and above the close from 5 trading days ago.
 2. This strategy currently has no new-entry protection. If a position is held and the Buy signal fails, the `t+1` action is `SELL_ALL`.
@@ -770,9 +951,9 @@ python3 update_states.py --states states.json --out states.json --mode Premarket
 
 ------
 
-## 14. Test case overview
+## 16. Test case overview
 
-### 14.1 Run all tests with one command
+### 16.1 Run all tests with one command
 
 ```bash
 ./run_tests.sh
@@ -786,7 +967,7 @@ Current coverage includes the following:
 - tactical signal tests and tests for folding projected sell proceeds into the buy cash pool
 - backtest tests covering `t+1` execution, period selection, and markdown report generation
 
-### 14.2 When fixtures should be refreshed
+### 16.2 When fixtures should be refreshed
 
 Whenever the following items are modified, `tests/fixtures/*golden*` should generally be refreshed:
 
@@ -794,7 +975,7 @@ Whenever the following items are modified, `tests/fixtures/*golden*` should gene
 - report schema or rendering behavior
 - trade data structures or output formats for `states.json` or `trades.json`
 
-### 14.3 Refresh regression fixtures with one command
+### 16.3 Refresh regression fixtures with one command
 
 ```bash
 ./refresh_test_fixtures.sh
@@ -808,7 +989,7 @@ An optional custom time anchor may also be specified:
 
 ------
 
-## 15. Versioning and changelog policy
+## 17. Versioning and changelog policy
 
 - This project is formally designated as `v1.0.0` effective `2026-03-19`.
 - From this point forward, whenever functionality, behavior, output format, or test baselines change, `CHANGELOG.md` must be updated.
