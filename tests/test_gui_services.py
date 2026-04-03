@@ -120,6 +120,47 @@ class GuiServicesTests(unittest.TestCase):
             self.assertIn("NVDA", snapshot.candidate_tickers)
             self.assertNotIn("TWD=X", snapshot.candidate_tickers)
 
+    def test_delete_all_reports_removes_standard_markdown_and_json_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_base_repo(root)
+            report_md = root / "report" / "2026-03-31_premarket.md"
+            report_json = root / "report" / "2026-03-31_premarket.json"
+            extra_md = root / "report" / "2026-03-30_intraday.md"
+            note = root / "report" / "notes.md"
+            report_md.write_text("# report\n", encoding="utf-8")
+            report_json.write_text("{}\n", encoding="utf-8")
+            extra_md.write_text("# older\n", encoding="utf-8")
+            note.write_text("# keep\n", encoding="utf-8")
+
+            result = GuiServices(root).delete_all_reports()
+
+            self.assertTrue(result.success)
+            self.assertFalse(report_md.exists())
+            self.assertFalse(report_json.exists())
+            self.assertFalse(extra_md.exists())
+            self.assertTrue(note.exists())
+            self.assertIn("Deleted 3 report artifacts across 2 reports.", result.message)
+
+    def test_delete_report_removes_matching_markdown_and_json_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_base_repo(root)
+            report_md = root / "report" / "2026-03-31_premarket.md"
+            report_json = root / "report" / "2026-03-31_premarket.json"
+            note = root / "report" / "notes.md"
+            report_md.write_text("# report\n", encoding="utf-8")
+            report_json.write_text("{}\n", encoding="utf-8")
+            note.write_text("# keep\n", encoding="utf-8")
+
+            result = GuiServices(root).delete_report(str(report_md))
+
+            self.assertTrue(result.success)
+            self.assertFalse(report_md.exists())
+            self.assertFalse(report_json.exists())
+            self.assertTrue(note.exists())
+            self.assertIn("Deleted 2 report artifacts for 2026-03-31_premarket.md.", result.message)
+
     def test_save_signal_config_rewrites_indicator_block(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -204,6 +245,11 @@ class GuiServerTests(unittest.TestCase):
             self.assertIn("Restart Server", rendered)
             self.assertIn("Stop Server", rendered)
             self.assertIn('action="/server-control"', rendered)
+            self.assertIn('action="/delete-report"', rendered)
+            self.assertIn('action="/delete-all-reports"', rendered)
+            self.assertIn("Delete All Reports", rendered)
+            self.assertIn('class="danger report-delete"', rendered)
+            self.assertIn('>X</button>', rendered)
             self.assertIn("if (button !== submitter)", rendered)
             self.assertIn('form.dataset.submitting = "1"', rendered)
             self.assertIn(".raw-report {", rendered)

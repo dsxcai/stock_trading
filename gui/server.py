@@ -248,6 +248,18 @@ class GuiApplication:
       overflow: auto;
       padding-right: 2px;
     }}
+    .report-actions {{
+      margin-top: 10px;
+    }}
+    .report-row {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: stretch;
+    }}
+    .report-delete-form {{
+      margin: 0;
+    }}
     .report-item {{
       display: grid;
       gap: 6px;
@@ -259,6 +271,14 @@ class GuiApplication:
     .report-item.active {{
       border-color: var(--accent);
       background: #eef7f8;
+    }}
+    .report-delete {{
+      width: 42px;
+      min-width: 42px;
+      padding: 0;
+      border-radius: 12px;
+      font-size: 1rem;
+      line-height: 1;
     }}
     .report-title {{
       font-weight: 700;
@@ -599,6 +619,9 @@ class GuiApplication:
         <div class="report-list">
           {self._render_recent_reports(recent_reports, snapshot.selected_report_path)}
         </div>
+        <form class="report-actions" method="post" action="/delete-all-reports" data-busy-message="Deleting all reports, please wait..." onsubmit="return window.confirm('Delete all reports under report/?');">
+          <button class="danger" type="submit">Delete All Reports</button>
+        </form>
       </section>
     </aside>
     <section class="panel">
@@ -681,13 +704,21 @@ class GuiApplication:
         chunks = []
         for item in recent_reports:
             active = " active" if item.path == selected_report_path else ""
+            item_name = html.escape(item.name)
+            item_path = html.escape(item.path)
+            delete_confirm = html.escape(str(item.name).replace("\\", "\\\\").replace("'", "\\'"))
             chunks.append(
+                '<div class="report-row">'
                 '<form method="post" action="/select-report" data-busy-message="Loading the report, please wait...">'
-                f'<button class="secondary report-item{active}" type="submit" name="report_path" value="{html.escape(item.path)}" data-busy-label="{html.escape(item.name)}">'
-                f'<span class="report-title">{html.escape(item.name)}</span>'
+                f'<button class="secondary report-item{active}" type="submit" name="report_path" value="{item_path}" data-busy-label="{item_name}">'
+                f'<span class="report-title">{item_name}</span>'
                 f'<span class="report-meta">{html.escape(item.mode_label)} · {html.escape(item.report_date)} · modified {html.escape(item.modified_at)}</span>'
                 "</button>"
                 "</form>"
+                f'<form class="report-delete-form" method="post" action="/delete-report" data-busy-message="Deleting the report, please wait..." onsubmit="return window.confirm(\'Delete {delete_confirm}?\');">'
+                f'<button class="danger report-delete" type="submit" name="report_path" value="{item_path}" aria-label="Delete {item_name}" title="Delete {item_name}">X</button>'
+                "</form>"
+                "</div>"
             )
         return "\n".join(chunks)
 
@@ -854,6 +885,20 @@ def make_handler(app: GuiApplication):
                 if parsed.path == "/select-report":
                     app.set_selected_report(fields.get("report_path", ""))
                     app.set_right_tab("report")
+                    return self._redirect_home()
+                if parsed.path == "/delete-report":
+                    report_path = fields.get("report_path", "")
+                    result = app.services.delete_report(report_path)
+                    if str(app.snapshot().selected_report_path or "").strip() == str(report_path or "").strip():
+                        app.set_selected_report("")
+                    app.set_right_tab("report")
+                    app.set_last_result(result)
+                    return self._redirect_home()
+                if parsed.path == "/delete-all-reports":
+                    result = app.services.delete_all_reports()
+                    app.set_selected_report("")
+                    app.set_right_tab("report")
+                    app.set_last_result(result)
                     return self._redirect_home()
                 if parsed.path == "/server-control":
                     server_action = str(fields.get("server_action", "")).strip().lower()

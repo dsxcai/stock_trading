@@ -14,6 +14,7 @@ from utils.config_access import discover_state_engine_tickers, load_json_object,
 
 
 _REPORT_NAME_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})_(?P<mode>premarket|intraday|afterclose)\.md$", re.IGNORECASE)
+_REPORT_ARTIFACT_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})_(?P<mode>premarket|intraday|afterclose)\.(?P<ext>md|json)$", re.IGNORECASE)
 _LOG_LINE_RE = re.compile(r"^\[LOG\] file=(.+)$", re.MULTILINE)
 _WROTE_LINE_RE = re.compile(r"^\[OK\] wrote (.+)$", re.MULTILINE)
 _ERROR_LINE_RE = re.compile(r"^\[(?:ABORT|ERR|ERROR|EXCEPTION)\]\s*(.+)$", re.MULTILINE)
@@ -110,6 +111,65 @@ class GuiServices:
         if not target.exists():
             return ""
         return target.read_text(encoding="utf-8")
+
+    def delete_report(self, report_path: str) -> OperationResult:
+        target = Path(str(report_path or "").strip())
+        if not target.is_absolute():
+            target = (self.repo_root / target).resolve()
+        else:
+            target = target.resolve()
+        try:
+            target.relative_to(self.report_dir)
+        except ValueError as exc:
+            raise ValueError("report path must be under report/") from exc
+        if target.suffix.lower() != ".md" or self.parse_report_identity(target) is None:
+            raise ValueError("report path must be a standard markdown report")
+        deleted_paths: List[str] = []
+        report_json = target.with_suffix(".json")
+        for candidate in [target, report_json]:
+            if candidate.exists() and candidate.is_file():
+                candidate.unlink()
+                deleted_paths.append(candidate.name)
+        if deleted_paths:
+            artifact_label = "artifact" if len(deleted_paths) == 1 else "artifacts"
+            message = f"Deleted {len(deleted_paths)} report {artifact_label} for {target.name}."
+        else:
+            message = f"No report artifacts were found for {target.name}."
+        return OperationResult(
+            name="Delete report",
+            success=True,
+            returncode=0,
+            command=f"delete-report {target.name}",
+            stdout="\n".join(deleted_paths),
+            message=message,
+        )
+
+    def delete_all_reports(self) -> OperationResult:
+        deleted_paths: List[str] = []
+        deleted_report_stems: set[str] = set()
+        if self.report_dir.exists():
+            for path in sorted(self.report_dir.iterdir()):
+                if not path.is_file() or not _REPORT_ARTIFACT_RE.match(path.name):
+                    continue
+                path.unlink()
+                deleted_paths.append(path.name)
+                deleted_report_stems.add(path.stem)
+        report_count = len(deleted_report_stems)
+        artifact_count = len(deleted_paths)
+        if artifact_count:
+            report_label = "report" if report_count == 1 else "reports"
+            artifact_label = "artifact" if artifact_count == 1 else "artifacts"
+            message = f"Deleted {artifact_count} report {artifact_label} across {report_count} {report_label}."
+        else:
+            message = "No standard report artifacts were found under report/."
+        return OperationResult(
+            name="Delete all reports",
+            success=True,
+            returncode=0,
+            command="delete-all-reports",
+            stdout="\n".join(deleted_paths),
+            message=message,
+        )
 
     def load_signal_config(self) -> SignalConfigSnapshot:
         config = load_state_engine_config(str(self.config_path))
