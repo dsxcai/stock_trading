@@ -3,6 +3,7 @@
 - Signal Basis: t=2026-03-17 (NYSE Close)
 - Execution Basis: t+1=2026-03-18 (NYSE Trading Day)
 - Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-26.
+- Nearby Trading Calendar: 2026-03-17 Open; 2026-03-18 Open; 2026-03-19 Open.
 
 ## Performance Summary
 | Item | Value |

@@ -2,12 +2,13 @@ from __future__ import annotations
 import json
 import math
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from core.report_meta import _effective_report_meta, _migrate_state_schema, _normalize_mode_key
-from utils.config_access import config_doc
+from utils.config_access import config_doc, config_trading_calendar
+from utils.trading_calendar import next_trading_day, prev_trading_day, trading_day_status_text
 
 def _extract_json_from_text(txt: str) -> Dict[str, Any]:
     s = txt.strip()
@@ -381,6 +382,45 @@ def _format_generated_at_et(value: Any) -> str:
         return raw
     return dt.strftime('%Y/%m/%d %H:%M:%S')
 
+
+def _report_anchor_date(meta: Dict[str, Any]) -> Optional[date]:
+    candidates = [
+        meta.get('version_anchor_et'),
+        ((meta.get('execution_basis') or {}).get('t_plus_1_et')),
+        ((meta.get('signal_basis') or {}).get('t_et')),
+        meta.get('generated_at_et'),
+    ]
+    for candidate in candidates:
+        dt = _parse_dateish(str(candidate or '').strip()) if candidate else None
+        if dt is not None:
+            return dt.date()
+    return None
+
+
+def _nearby_trading_calendar_line(states: Dict[str, Any], meta: Dict[str, Any]) -> str:
+    cfg = states.get('config', {}) or {}
+    calendar_cfg = config_trading_calendar(cfg)
+    if not calendar_cfg:
+        return ''
+    anchor_day = _report_anchor_date(meta)
+    if anchor_day is None:
+        return ''
+    nearby_days: List[date] = []
+    prev_day = prev_trading_day(calendar_cfg, anchor_day)
+    if prev_day is not None:
+        nearby_days.append(prev_day)
+    nearby_days.append(anchor_day)
+    next_day = next_trading_day(calendar_cfg, anchor_day)
+    if next_day is not None:
+        nearby_days.append(next_day)
+    rendered_parts = [
+        f'{day_value.isoformat()} {trading_day_status_text(calendar_cfg, day_value)}'
+        for day_value in nearby_days[:3]
+    ]
+    if not rendered_parts:
+        return ''
+    return f"- Nearby Trading Calendar: {'; '.join(rendered_parts)}."
+
 def render_report(states: Dict[str, Any], schema: Dict[str, Any], mode: str) -> str:
     null_display = (schema.get('output') or {}).get('null_display') or '-'
     meta = _effective_report_meta(states, mode)
@@ -409,6 +449,9 @@ def render_report(states: Dict[str, Any], schema: Dict[str, Any], mode: str) -> 
         note_text = str(note or '').strip()
         if note_text:
             lines.append(f'- {note_text}')
+    nearby_calendar_line = _nearby_trading_calendar_line(states, meta)
+    if nearby_calendar_line:
+        lines.append(nearby_calendar_line)
     lines.append('')
     for t in schema.get('tables') or []:
         title = t.get('title') or ''

@@ -39,7 +39,20 @@ class ReportingSafetyTests(unittest.TestCase):
 
     def test_render_report_uses_transient_report_meta(self) -> None:
         states = {
-            "config": {"meta": {"doc": "Daily Investment Report"}},
+            "config": {
+                "meta": {"doc": "Daily Investment Report"},
+                "data": {
+                    "trading_calendar": {
+                        "years": {
+                            "2026": {
+                                "closed": {
+                                    "2026-04-03": "Good Friday",
+                                }
+                            }
+                        }
+                    }
+                },
+            },
             "_report_meta": {
                 "mode": "Premarket",
                 "mode_key": "premarket",
@@ -57,6 +70,52 @@ class ReportingSafetyTests(unittest.TestCase):
         self.assertIn("- Signal Basis: t=2026-03-17 (NYSE Close)", markdown)
         self.assertIn("- Execution Basis: t+1=2026-03-18 (NYSE Trading Day)", markdown)
         self.assertIn("- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24.", markdown)
+        self.assertIn("- Nearby Trading Calendar: 2026-03-17 Open; 2026-03-18 Open; 2026-03-19 Open.", markdown)
+
+    def test_render_report_trading_calendar_line_handles_closed_and_trade_no_settlement(self) -> None:
+        states = {
+            "config": {
+                "meta": {"doc": "Daily Investment Report"},
+                "data": {
+                    "trading_calendar": {
+                        "years": {
+                            "2026": {
+                                "closed": {
+                                    "2026-04-03": "Good Friday",
+                                },
+                                "trade_no_settlement": {
+                                    "2026-10-12": "Columbus Day",
+                                },
+                            }
+                        }
+                    }
+                },
+            },
+            "_report_meta": {
+                "mode": "Premarket",
+                "mode_key": "premarket",
+                "generated_at_et": "2026-04-03T08:00:00-04:00",
+                "signal_basis": {"t_et": "2026-04-02", "basis": "NYSE Close"},
+                "execution_basis": {"t_plus_1_et": "2026-04-03", "basis": "NYSE Trading Day"},
+                "version_anchor_et": "2026-04-03",
+            },
+        }
+
+        markdown = reporting.render_report(states, {"tables": []}, "Premarket")
+
+        self.assertIn("- Nearby Trading Calendar: 2026-04-02 Open; 2026-04-03 Closed (Good Friday); 2026-04-06 Open.", markdown)
+
+        states["_report_meta"]["generated_at_et"] = "2026-10-12T08:00:00-04:00"
+        states["_report_meta"]["signal_basis"] = {"t_et": "2026-10-09", "basis": "NYSE Close"}
+        states["_report_meta"]["execution_basis"] = {"t_plus_1_et": "2026-10-12", "basis": "NYSE Trading Day"}
+        states["_report_meta"]["version_anchor_et"] = "2026-10-12"
+
+        markdown = reporting.render_report(states, {"tables": []}, "Premarket")
+
+        self.assertIn(
+            "- Nearby Trading Calendar: 2026-10-09 Open; 2026-10-12 Open (Trade, No Settlement: Columbus Day); 2026-10-13 Open.",
+            markdown,
+        )
 
     def test_render_report_renders_table_after_lines(self) -> None:
         states = {

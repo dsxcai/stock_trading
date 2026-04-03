@@ -50,6 +50,12 @@ from utils.parsers import (
     _trade_time_tw_to_et_dt,
 )
 from utils.precision import format_fixed, round_with_precision, state_engine_numeric_precision
+from utils.trading_calendar import (
+    closed_reason,
+    closed_set_for_year_block as _closed_set_for_year_block,
+    early_close_payload,
+    is_weekend_et as _is_weekend_et,
+)
 
 def _load_json(path: str) -> Dict[str, Any]:
     return json.loads(Path(path).read_text(encoding='utf-8'))
@@ -198,48 +204,16 @@ _TW_TZ = 'Asia/Taipei'
 _OPEN_TIME_ET = time(9, 30)
 _DEFAULT_CLOSE_TIME_ET = time(16, 0)
 
-def _default_trading_calendar_2026() -> Dict[str, Any]:
-    return {
-        'closed': {
-            '2026-01-01': 'New Year’s Day',
-            '2026-01-19': 'Martin Luther King, Jr. Day',
-            '2026-02-16': 'Presidents Day (Washington’s Birthday)',
-            '2026-04-03': 'Good Friday',
-            '2026-05-25': 'Memorial Day',
-            '2026-06-19': 'Juneteenth',
-            '2026-07-03': 'Independence Day (Observed)',
-            '2026-09-07': 'Labor Day',
-            '2026-11-26': 'Thanksgiving Day',
-            '2026-12-25': 'Christmas Day',
-        },
-        'early_close': {
-            '2026-11-27': {'reason': 'Day After Thanksgiving', 'close_time_et': '13:00'},
-            '2026-12-24': {'reason': 'Christmas Eve', 'close_time_et': '13:00'},
-        },
-    }
-
 def _ensure_trading_calendar(runtime: Dict[str, Any]) -> Dict[str, Any]:
     data = _runtime_data_config(runtime)
     cal = data.setdefault('trading_calendar', {})
     if not isinstance(cal, dict):
         cal = {}
         data['trading_calendar'] = cal
-    years = cal.setdefault('years', {})
-    years.setdefault('2026', _default_trading_calendar_2026())
+    years = cal.get('years')
+    if not isinstance(years, dict):
+        cal['years'] = {}
     return cal
-
-def _is_weekend_et(d: date) -> bool:
-    return d.weekday() >= 5
-
-def _closed_set_for_year_block(year_block: Dict[str, Any]) -> set:
-    closed = year_block.get('closed')
-    if not isinstance(closed, dict):
-        return set()
-    return {
-        str(date_et).strip()
-        for date_et in closed.keys()
-        if str(date_et).strip()
-    }
 
 def _next_trading_day_et_from_states(runtime: Dict[str, Any], t_et: str) -> Optional[str]:
     t_et = str(t_et or '').strip()
@@ -335,10 +309,7 @@ def _is_full_day_closed_et(runtime: Dict[str, Any], d: date) -> bool:
     if _is_weekend_et(d):
         return True
     try:
-        cal = config_trading_calendar(_runtime_config(runtime))
-        years = cal.get('years') or {}
-        year_block = years.get(f'{d.year:04d}') or {}
-        return d.isoformat() in _closed_set_for_year_block(year_block)
+        return bool(closed_reason(config_trading_calendar(_runtime_config(runtime)), d))
     except Exception:
         return False
 
@@ -347,17 +318,8 @@ def _is_trading_day_et(runtime: Dict[str, Any], d: date) -> bool:
 
 def _close_time_et_from_states(runtime: Dict[str, Any], d: date) -> time:
     try:
-        cal = config_trading_calendar(_runtime_config(runtime))
-        years = cal.get('years') or {}
-        year_block = years.get(f'{d.year:04d}') or {}
-        early_close = year_block.get('early_close')
-        if not isinstance(early_close, dict):
-            return _DEFAULT_CLOSE_TIME_ET
-        payload = early_close.get(d.isoformat()) or {}
-        if isinstance(payload, dict):
-            raw = str(payload.get('close_time_et') or '').strip()
-        else:
-            raw = ''
+        payload = early_close_payload(config_trading_calendar(_runtime_config(runtime)), d)
+        raw = str(payload.get('close_time_et') or '').strip()
         if raw:
             parts = raw.split(':')
             hh = int(parts[0])
