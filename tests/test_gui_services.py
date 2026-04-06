@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -315,16 +316,40 @@ class GuiServerTests(unittest.TestCase):
 
 
 class GuiAppTests(unittest.TestCase):
-    def test_main_restarts_server_when_requested(self) -> None:
+    def test_build_client_url_uses_loopback_for_wildcard_host(self) -> None:
+        self.assertEqual(gui_app._build_client_url("0.0.0.0", 8765), "http://127.0.0.1:8765/")
+
+    def test_main_uses_desktop_mode_by_default(self) -> None:
+        with mock.patch.object(sys, "argv", ["gui_app.py"]):
+            with mock.patch.object(gui_app, "run_desktop_app") as mocked_desktop:
+                with mock.patch.object(gui_app, "run_browser_app") as mocked_browser:
+                    exit_code = gui_app.main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_desktop.assert_called_once()
+        mocked_browser.assert_not_called()
+
+    def test_main_restarts_server_when_requested_in_browser_mode(self) -> None:
         with mock.patch.object(sys, "argv", ["gui_app.py", "--open-browser"]):
             with mock.patch.object(gui_app, "run_server", side_effect=["restart", "shutdown"]) as mocked:
-                gui_app.main()
+                exit_code = gui_app.main()
 
+        self.assertEqual(exit_code, 0)
         self.assertEqual(mocked.call_count, 2)
         first_kwargs = mocked.call_args_list[0].kwargs
         second_kwargs = mocked.call_args_list[1].kwargs
         self.assertTrue(first_kwargs["open_browser"])
         self.assertFalse(second_kwargs["open_browser"])
+
+    def test_main_reports_missing_pywebview(self) -> None:
+        with mock.patch.object(sys, "argv", ["gui_app.py"]):
+            with mock.patch.object(gui_app, "run_desktop_app", side_effect=RuntimeError("pywebview missing")):
+                stderr = io.StringIO()
+                with mock.patch("sys.stderr", stderr):
+                    exit_code = gui_app.main()
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("pywebview missing", stderr.getvalue())
 
 
 if __name__ == "__main__":

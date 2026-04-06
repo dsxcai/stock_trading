@@ -11,23 +11,29 @@ The purpose of this document is as follows:
 
 ## 1. Local GUI
 
-The project now includes a local GUI for routine operation. It is a Python application that serves a local browser-based dashboard, so day-to-day workflows can be executed without typing the underlying commands manually.
+The project now includes a local GUI for routine operation. It is a Python application that serves the existing local dashboard into a native desktop window through `pywebview`, so day-to-day workflows can be executed without typing the underlying commands manually and without opening a separate browser yourself.
 
 ### 1.1 Start the GUI
 
-Recommended:
+Install the desktop window dependency once:
 
 ```bash
-python3 gui_app.py --open-browser
+python3 -m pip install pywebview
 ```
 
-If you prefer to launch the server without auto-opening a browser tab:
+Recommended:
 
 ```bash
 python3 gui_app.py
 ```
 
-The GUI starts a local HTTP server and opens the dashboard on the configured host and port.
+This starts the local HTTP server and opens the GUI in a native desktop window.
+
+If you want to keep using the old browser-based mode instead:
+
+```bash
+python3 gui_app.py --open-browser
+```
 
 ### 1.2 What the GUI currently covers
 
@@ -111,7 +117,7 @@ Also confirm that the following project files and directories already exist and 
 
 This is the simplest path when your broker export is available as Capital Securities `OSHistoryDealAll.xls`.
 
-1. Start the GUI with `python3 gui_app.py --open-browser`.
+1. Start the GUI with `python3 gui_app.py`.
 2. Open the `Import Trades` panel.
 3. Upload the full broker export, or provide its local file path.
 4. Keep `Import Mode` as `replace` for the first bootstrap.
