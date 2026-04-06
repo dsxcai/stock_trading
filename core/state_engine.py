@@ -14,11 +14,11 @@ from core.models import ImportResult, ReportContext
 from core.report_bundle import build_report_root, ensure_report_root_fields
 from core.report_meta import _effective_report_meta, _migrate_state_schema, _normalize_mode_key
 from core.reconciliation import (
+    _find_trade_conflicts,
     _first_token_ticker,
     _normalize_trades_inplace,
     _num_from_cell,
     _trade_buy_total_cost_usd,
-    _trade_key,
     _upsert_trades,
     _verify_holdings_with_broker_investment_total,
 )
@@ -1276,31 +1276,56 @@ def _update_portfolio_performance(states: Dict[str, Any], usd_amount_ndigits: in
     returns['profit_usd'] = profit_usd
     returns['profit_rate'] = profit_rate
 
-def _replace_trades_for_incoming_scope(trades: List[Dict[str, Any]], incoming: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+def _normalize_trade_date_bounds(trade_date_from: str, trade_date_to: str) -> Tuple[str, str]:
+    start = _parse_ymd_loose(trade_date_from)
+    end = _parse_ymd_loose(trade_date_to)
+    if str(trade_date_from or '').strip() and start is None:
+        raise ValueError(f'invalid trade date from: {trade_date_from}')
+    if str(trade_date_to or '').strip() and end is None:
+        raise ValueError(f'invalid trade date to: {trade_date_to}')
+    if start is not None and end is not None and start > end:
+        raise ValueError(f'trade date from {start.isoformat()} is after trade date to {end.isoformat()}')
+    return (
+        start.isoformat() if start is not None else '',
+        end.isoformat() if end is not None else '',
+    )
+
+def _trade_is_within_trade_date_bounds(trade: Dict[str, Any], trade_date_from: str, trade_date_to: str) -> bool:
+    trade_date_et = _normalize_trade_date_et(str(trade.get('trade_date_et') or ''))
+    if not trade_date_et:
+        return False
+    if trade_date_from and trade_date_et < trade_date_from:
+        return False
+    if trade_date_to and trade_date_et > trade_date_to:
+        return False
+    return True
+
+def _replace_all_trades(trades: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
     if not isinstance(trades, list) or not trades:
         return (trades if isinstance(trades, list) else [], 0)
-    scope = set()
-    for t in incoming:
-        d = _normalize_trade_date_et(str(t.get('trade_date_et') or ''))
-        tk = str(t.get('ticker') or '').upper()
-        if d and tk:
-            scope.add((d, tk))
-    if not scope:
+    removed = len(trades)
+    print(f'[REPLACE] removed {removed} existing trade(s) from the full trade ledger.')
+    return ([], removed)
+
+def _replace_trades_for_trade_date_range(trades: List[Dict[str, Any]], trade_date_from: str, trade_date_to: str) -> Tuple[List[Dict[str, Any]], int]:
+    if not isinstance(trades, list) or not trades:
+        return (trades if isinstance(trades, list) else [], 0)
+    if not (trade_date_from or trade_date_to):
         return (trades, 0)
-    keep = []
-    removed = []
-    for t in trades:
-        if not isinstance(t, dict):
-            keep.append(t)
+    keep: List[Dict[str, Any]] = []
+    removed: List[Dict[str, Any]] = []
+    for trade in trades:
+        if not isinstance(trade, dict):
+            keep.append(trade)
             continue
-        d = _normalize_trade_date_et(str(t.get('trade_date_et') or ''))
-        tk = str(t.get('ticker') or '').upper()
-        if (d, tk) in scope:
-            removed.append(t)
+        if _trade_is_within_trade_date_bounds(trade, trade_date_from, trade_date_to):
+            removed.append(trade)
         else:
-            keep.append(t)
+            keep.append(trade)
     if removed:
-        print(f'[REPLACE] removed {len(removed)} existing trade(s) in scope {len(scope)} (date,ticker) pairs.')
+        start = trade_date_from or 'min'
+        end = trade_date_to or 'max'
+        print(f'[REPLACE] removed {len(removed)} existing trade(s) in trade_date_et range {start}..{end}.')
     return (keep if removed else trades, len(removed))
 
 def _sort_key_trade_for_portfolio(t: Dict[str, Any]) -> tuple:
@@ -1675,25 +1700,55 @@ def _run_main(args: argparse.Namespace) -> int:
     )
     processed_tickers = list(tickers)
     _normalize_trades_inplace(trades, cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]))
+    trade_date_from, trade_date_to = _normalize_trade_date_bounds(
+        str(getattr(args, 'trade_date_from', '') or '').strip(),
+        str(getattr(args, 'trade_date_to', '') or '').strip(),
+    )
     if args.imported_trades_json:
         for import_path in args.imported_trades_json:
             try:
                 incoming = _load_imported_trades_json(import_path)
                 _normalize_trades_inplace(incoming, cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]))
                 import_label = _trade_import_label(import_path, incoming)
+                if trade_date_from or trade_date_to:
+                    incoming = [
+                        trade for trade in incoming
+                        if isinstance(trade, dict) and _trade_is_within_trade_date_bounds(trade, trade_date_from, trade_date_to)
+                    ]
+                if trade_date_from or trade_date_to:
+                    start = trade_date_from or 'min'
+                    end = trade_date_to or 'max'
+                    print(f'[FILTER] trades import {import_label}: trade_date_et range {start}..{end} | kept={len(incoming)}')
                 mode = (args.trades_import_mode or 'append').strip().lower()
                 if mode not in ('append', 'replace'):
                     mode = 'append'
-                replaced_scope_count = 0
+                removed_trade_count = 0
+                if mode == 'append':
+                    conflicts = _find_trade_conflicts(
+                        trades,
+                        incoming,
+                        cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]),
+                        trade_dedupe_amount_ndigits=int(numeric_precision["trade_dedupe_amount"]),
+                    )
+                    if conflicts:
+                        detail = "; ".join(conflicts[:5])
+                        if len(conflicts) > 5:
+                            detail += f"; ... ({len(conflicts)} conflicts total)"
+                        raise ValueError(
+                            f"append import conflict detected for {import_label}: {detail}"
+                        )
                 if mode == 'replace':
-                    trades, replaced_scope_count = _replace_trades_for_incoming_scope(trades, incoming)
+                    if trade_date_from or trade_date_to:
+                        trades, removed_trade_count = _replace_trades_for_trade_date_range(trades, trade_date_from, trade_date_to)
+                    else:
+                        trades, removed_trade_count = _replace_all_trades(trades)
                 added, dup = _upsert_trades(
                     trades,
                     incoming,
                     cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]),
                     trade_dedupe_amount_ndigits=int(numeric_precision["trade_dedupe_amount"]),
                 )
-                if added > 0 or replaced_scope_count > 0:
+                if added > 0 or removed_trade_count > 0:
                     _rebuild_portfolio_positions_from_day1_fifo(states, runtime, trades)
                     portfolio_delta_desc = 'day1_rebuild'
                 else:
@@ -1702,6 +1757,8 @@ def _run_main(args: argparse.Namespace) -> int:
                 print(f'[OK] trades import {import_label}: parsed={len(incoming)}, added={added}, dup={dup}, mode={mode}, portfolio_delta={portfolio_delta_desc}')
             except Exception as e:
                 print(f'[ERR] trades import failed for {import_path}: {e}')
+                print('[ABORT] No state update and no report file were generated.')
+                raise SystemExit(2)
     late_results = _late_hydrate_new_position_tickers(
         states,
         runtime,

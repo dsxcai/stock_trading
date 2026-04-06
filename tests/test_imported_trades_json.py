@@ -69,7 +69,14 @@ def _trade(
 class ImportedTradesJsonTests(unittest.TestCase):
     maxDiff = None
 
-    def _run_update(self, states_path: Path, trades_path: Path, imported_path: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
+    def _run_update_raw(
+        self,
+        states_path: Path,
+        trades_path: Path,
+        imported_path: Path,
+        *extra_args: str,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 sys.executable,
@@ -87,8 +94,11 @@ class ImportedTradesJsonTests(unittest.TestCase):
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
-            check=True,
+            check=check,
         )
+
+    def _run_update(self, states_path: Path, trades_path: Path, imported_path: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
+        return self._run_update_raw(states_path, trades_path, imported_path, *extra_args, check=True)
 
     def test_imported_trades_json_defaults_to_append_and_dedupes(self) -> None:
         batch_a = [
@@ -127,6 +137,34 @@ class ImportedTradesJsonTests(unittest.TestCase):
             second_trades = json.loads(trades_path.read_text(encoding="utf-8"))
             self.assertEqual(len(second_trades), 3)
             self.assertAlmostEqual(float(second_trades[2]["cash_amount"]), 236.47, places=4)
+
+    def test_imported_trades_json_append_conflict_aborts_without_changing_ledger(self) -> None:
+        existing = [
+            _trade("2026-03-20", "2026/03/20 21:31:18", "NVDA", 10, 1772.0, 3.54),
+        ]
+        incoming = [
+            _trade("2026-03-20", "2026/03/20 21:31:18", "NVDA", 12, 2126.4, 4.25),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            states_path = tmpdir / "states.json"
+            trades_path = tmpdir / "trades.json"
+            import_path = tmpdir / "import_conflict.json"
+
+            states_path.write_text("{}\n", encoding="utf-8")
+            trades_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+            import_path.write_text(json.dumps(incoming, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            result = self._run_update_raw(states_path, trades_path, import_path, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("[ERR] trades import failed", result.stdout)
+            self.assertIn("append import conflict detected", result.stdout)
+            self.assertIn("[ABORT] No state update and no report file were generated.", result.stdout)
+
+            trades = json.loads(trades_path.read_text(encoding="utf-8"))
+            self.assertEqual(trades, existing)
 
     def test_imported_trades_json_rounds_cash_amount_to_4dp_before_persist(self) -> None:
         ndigits = _trade_cash_amount_ndigits()
@@ -225,7 +263,7 @@ class ImportedTradesJsonTests(unittest.TestCase):
             self.assertEqual(position, {"ticker": "AAA", "shares": 2})
             self.assertNotIn("totals", states.get("portfolio", {}))
 
-    def test_imported_trades_json_replace_replaces_scope_only(self) -> None:
+    def test_imported_trades_json_replace_replaces_full_ledger(self) -> None:
         existing = [
             _trade("2026-03-19", "2026/03/19 22:00:00", "GOOG", 1, 300.00001, 0.60005),
             _trade("2026-03-20", "2026/03/20 21:31:18", "NVDA", 10, 1772.0, 3.54),
@@ -250,18 +288,60 @@ class ImportedTradesJsonTests(unittest.TestCase):
             third = self._run_update(states_path, trades_path, import_path, "--trades-import-mode", "replace")
             self.assertIn("mode=replace", third.stdout)
             self.assertIn("added=3, dup=0", third.stdout)
-            self.assertIn("[REPLACE] removed 2 existing trade(s)", third.stdout)
+            self.assertIn("[REPLACE] removed 3 existing trade(s) from the full trade ledger.", third.stdout)
 
             trades = json.loads(trades_path.read_text(encoding="utf-8"))
-            self.assertEqual(len(trades), 4)
+            self.assertEqual(len(trades), 3)
             by_ticker = {trade["ticker"]: trade for trade in trades}
-            self.assertEqual(by_ticker["GOOG"]["shares"], 1)
             self.assertEqual(by_ticker["NVDA"]["shares"], 12)
             self.assertEqual(by_ticker["SMH"]["shares"], 6)
             self.assertEqual(by_ticker["ARKQ"]["shares"], 2)
+            self.assertNotIn("GOOG", by_ticker)
+
+    def test_imported_trades_json_replace_with_trade_date_range_replaces_full_range(self) -> None:
+        existing = [
+            _trade("2026-03-19", "2026/03/19 22:00:00", "GOOG", 1, 300.00001, 0.60005),
+            _trade("2026-03-20", "2026/03/20 21:31:18", "NVDA", 10, 1772.0, 3.54),
+            _trade("2026-03-20", "2026/03/20 21:34:37", "SMH", 5, 1969.66, 3.94),
+            _trade("2026-03-21", "2026/03/21 21:36:32", "ARKQ", 2, 236.0, 0.47),
+        ]
+        incoming = [
+            _trade("2026-03-20", "2026/03/20 21:31:18", "NVDA", 12, 2126.40004, 4.25005),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            states_path = tmpdir / "states.json"
+            trades_path = tmpdir / "trades.json"
+            import_path = tmpdir / "import_replace_range.json"
+
+            states_path.write_text("{}\n", encoding="utf-8")
+            trades_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+            import_path.write_text(json.dumps(incoming, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            result = self._run_update(
+                states_path,
+                trades_path,
+                import_path,
+                "--trades-import-mode",
+                "replace",
+                "--trade-date-from",
+                "2026-03-20",
+                "--trade-date-to",
+                "2026-03-20",
+            )
+            self.assertIn("mode=replace", result.stdout)
+            self.assertIn("[REPLACE] removed 2 existing trade(s) in trade_date_et range 2026-03-20..2026-03-20.", result.stdout)
+
+            trades = json.loads(trades_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(trades), 3)
+            by_ticker = {trade["ticker"]: trade for trade in trades}
+            self.assertEqual(by_ticker["GOOG"]["shares"], 1)
+            self.assertEqual(by_ticker["NVDA"]["shares"], 12)
+            self.assertEqual(by_ticker["ARKQ"]["shares"], 2)
+            self.assertNotIn("SMH", by_ticker)
             self.assertAlmostEqual(float(by_ticker["GOOG"]["cash_amount"]), 300.6001, places=4)
             self.assertAlmostEqual(float(by_ticker["NVDA"]["cash_amount"]), 2130.6501, places=4)
-            self.assertAlmostEqual(float(by_ticker["SMH"]["cash_amount"]), 2368.3201, places=4)
 
 
 if __name__ == "__main__":

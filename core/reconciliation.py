@@ -41,6 +41,18 @@ def _trade_key(trade: Dict[str, Any], amount_ndigits: int) -> str:
     )
 
 
+def _trade_identity_key(trade: Dict[str, Any]) -> str:
+    """Build a natural-key identity used to detect conflicting trade rows."""
+    return "|".join(
+        [
+            str(trade.get("trade_date_et") or ""),
+            str(trade.get("time_tw") or ""),
+            str(trade.get("ticker") or "").upper(),
+            str(trade.get("side") or "").upper(),
+        ]
+    )
+
+
 def _trade_buy_total_cost_usd(trade: Dict[str, Any]) -> Optional[float]:
     """Return the all-in buy cost using the normalized trade cash fields when present."""
     for key in ("cash_amount", "amount"):
@@ -116,6 +128,58 @@ def _upsert_trades(
         existing_keys.add(key)
         added += 1
     return added, duplicates
+
+
+def _find_trade_conflicts(
+    trades: List[Dict[str, Any]],
+    incoming: List[Dict[str, Any]],
+    *,
+    cash_amount_ndigits: int,
+    trade_dedupe_amount_ndigits: int,
+) -> List[str]:
+    """Find conflicting rows where the natural trade identity matches but values differ."""
+    _normalize_trades_inplace(trades, cash_amount_ndigits=cash_amount_ndigits)
+    _normalize_trades_inplace(incoming, cash_amount_ndigits=cash_amount_ndigits)
+
+    existing_by_identity: Dict[str, set[str]] = {}
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        identity = _trade_identity_key(trade)
+        existing_by_identity.setdefault(identity, set()).add(
+            _trade_key(trade, amount_ndigits=trade_dedupe_amount_ndigits)
+        )
+
+    incoming_by_identity: Dict[str, set[str]] = {}
+    conflicts: List[str] = []
+    seen: set[str] = set()
+
+    for trade in incoming:
+        if not isinstance(trade, dict):
+            continue
+        identity = _trade_identity_key(trade)
+        key = _trade_key(trade, amount_ndigits=trade_dedupe_amount_ndigits)
+
+        existing_variants = existing_by_identity.get(identity) or set()
+        if existing_variants and key not in existing_variants:
+            conflict_id = f"existing:{identity}"
+            if conflict_id not in seen:
+                seen.add(conflict_id)
+                conflicts.append(
+                    f"{identity} conflicts with existing trade data"
+                )
+
+        incoming_variants = incoming_by_identity.setdefault(identity, set())
+        if incoming_variants and key not in incoming_variants:
+            conflict_id = f"incoming:{identity}"
+            if conflict_id not in seen:
+                seen.add(conflict_id)
+                conflicts.append(
+                    f"{identity} conflicts within the imported batch"
+                )
+        incoming_variants.add(key)
+
+    return conflicts
 
 
 def _group_key_trade(trade: Dict[str, Any]) -> tuple[str, str, str]:

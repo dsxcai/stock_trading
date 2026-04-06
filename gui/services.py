@@ -341,6 +341,8 @@ class GuiServices:
         capital_xls_path: str,
         *,
         trades_import_mode: str = "replace",
+        trade_date_from: str = "",
+        trade_date_to: str = "",
         selected_report_path: str = "",
         allow_incomplete_csv_rows: bool = False,
     ) -> OperationResult:
@@ -363,6 +365,12 @@ class GuiServices:
             "--trades-import-mode",
             str(trades_import_mode or "replace"),
         ]
+        trade_date_from_value = str(trade_date_from or "").strip()
+        trade_date_to_value = str(trade_date_to or "").strip()
+        if trade_date_from_value:
+            command.extend(["--trade-date-from", trade_date_from_value])
+        if trade_date_to_value:
+            command.extend(["--trade-date-to", trade_date_to_value])
         primary = self._run_command(command, name="Import trades")
         if not primary.success:
             return primary

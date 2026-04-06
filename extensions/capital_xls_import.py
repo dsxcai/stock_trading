@@ -174,9 +174,21 @@ def _write_temp_import_json(trades: List[Dict[str, Any]]) -> Path:
         return Path(fh.name)
 
 
-def _build_update_states_command(import_json_path: str, passthrough_args: List[str]) -> List[str]:
+def _build_update_states_command(
+    import_json_path: str,
+    passthrough_args: List[str],
+    *,
+    trade_date_from: str = "",
+    trade_date_to: str = "",
+) -> List[str]:
     repo_root = Path(__file__).resolve().parents[1]
-    return [sys.executable, str(repo_root / "update_states.py"), "--imported-trades-json", import_json_path, *passthrough_args]
+    command = [sys.executable, str(repo_root / "update_states.py"), "--imported-trades-json", import_json_path]
+    if str(trade_date_from or "").strip():
+        command.extend(["--trade-date-from", str(trade_date_from).strip()])
+    if str(trade_date_to or "").strip():
+        command.extend(["--trade-date-to", str(trade_date_to).strip()])
+    command.extend(passthrough_args)
+    return command
 
 
 def _config_path_from_passthrough_args(passthrough_args: List[str]) -> str:
@@ -196,14 +208,26 @@ def _config_path_from_passthrough_args(passthrough_args: List[str]) -> str:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("capital_xls_path", help="Capital Securities OSHistoryDealAll.xls export path")
+    parser.add_argument("--trade-date-from", default="", help="Optional ET trade-date lower bound (YYYY-MM-DD)")
+    parser.add_argument("--trade-date-to", default="", help="Optional ET trade-date upper bound (YYYY-MM-DD)")
     args, passthrough_args = parser.parse_known_args(argv)
 
     config_path = _config_path_from_passthrough_args(passthrough_args)
     numeric_precision = load_state_engine_numeric_precision(config_path)
-    trades = parse_capital_xls_trades(args.capital_xls_path, cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]))
+    trades = parse_capital_xls_trades(
+        args.capital_xls_path,
+        cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]),
+    )
     temp_json_path = _write_temp_import_json(trades)
     try:
-        proc = subprocess.run(_build_update_states_command(str(temp_json_path), passthrough_args))
+        proc = subprocess.run(
+            _build_update_states_command(
+                str(temp_json_path),
+                passthrough_args,
+                trade_date_from=args.trade_date_from,
+                trade_date_to=args.trade_date_to,
+            )
+        )
         return int(proc.returncode or 0)
     finally:
         try:

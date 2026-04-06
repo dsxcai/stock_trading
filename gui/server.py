@@ -602,11 +602,17 @@ class GuiApplication:
               <option value="replace" selected>replace</option>
             </select>
           </label>
+          <label>Trade Date From (ET)
+            <input type="date" name="trade_date_from">
+          </label>
+          <label>Trade Date To (ET)
+            <input type="date" name="trade_date_to">
+          </label>
           <div class="inline">
             <input id="allow_incomplete_import" type="checkbox" name="allow_incomplete_csv_rows" value="1">
             <label for="allow_incomplete_import" style="gap:0;">Allow incomplete CSV rows for report refresh</label>
           </div>
-          <div class="form-note">On success, the GUI will regenerate the currently selected report when that report can be identified by date and mode.</div>
+          <div class="form-note">Optional trade-date bounds filter the imported XLS rows before append or replace. On success, the GUI will regenerate the currently selected report when that report can be identified by date and mode.</div>
           <button type="submit">Import Trades</button>
         </form>
       </section>
@@ -945,6 +951,8 @@ def make_handler(app: GuiApplication):
                         result = app.services.run_import_trades(
                             upload_path,
                             trades_import_mode=fields.get("trades_import_mode", "replace"),
+                            trade_date_from=fields.get("trade_date_from", ""),
+                            trade_date_to=fields.get("trade_date_to", ""),
                             selected_report_path=app.snapshot().selected_report_path,
                             allow_incomplete_csv_rows=bool(fields.get("allow_incomplete_csv_rows")),
                         )

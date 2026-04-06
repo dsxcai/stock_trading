@@ -270,6 +270,50 @@ class CapitalXLSImportTests(unittest.TestCase):
             self.assertIn("added=0, dup=2", second.stdout)
             self.assertEqual(len(json.loads(trades_path.read_text(encoding="utf-8"))), 2)
 
+    def test_capital_xls_wrapper_append_conflict_aborts_without_changing_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            states_path = tmpdir / "states.json"
+            trades_path = tmpdir / "trades.json"
+            xls_path = tmpdir / "OSHistoryDealAll-conflict.xls"
+
+            states_path.write_text("{}\n", encoding="utf-8")
+            seeded = [
+                _trade("2026-03-20", "2026/03/20 21:31:18", "NVDA", "SELL", 30, 5300.0, 10.6),
+            ]
+            trades_path.write_text(json.dumps(seeded, ensure_ascii=False, indent=2), encoding="utf-8")
+            _write_capital_xls(
+                xls_path,
+                [
+                    _capital_row("NVDA 輝達", "2026/03/20", "賣出", "177.2000", "33股", "5,847.6000", "2026/03/20 21:31:18", "11.70", "5,835.90"),
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "update_xml.sh",
+                    str(xls_path),
+                    "--states",
+                    str(states_path),
+                    "--out",
+                    str(states_path),
+                    "--trades-file",
+                    str(trades_path),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("[ERR] trades import failed", result.stdout)
+            self.assertIn("append import conflict detected", result.stdout)
+
+            trades = json.loads(trades_path.read_text(encoding="utf-8"))
+            self.assertEqual(trades, seeded)
+
     def test_capital_xls_wrapper_rounds_cash_amount_to_4dp_before_persist(self) -> None:
         ndigits = _trade_cash_amount_ndigits()
         with tempfile.TemporaryDirectory() as tmp:
@@ -356,7 +400,7 @@ class CapitalXLSImportTests(unittest.TestCase):
             trades = json.loads(trades_path.read_text(encoding="utf-8"))
             self.assertAlmostEqual(float(trades[0]["cash_amount"]), 5835.90, places=2)
 
-    def test_capital_xls_wrapper_replace_replaces_scope_only(self) -> None:
+    def test_capital_xls_wrapper_replace_replaces_full_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
             states_path = tmpdir / "states.json"
@@ -401,16 +445,126 @@ class CapitalXLSImportTests(unittest.TestCase):
 
             self.assertIn("mode=replace", result.stdout)
             self.assertIn("added=3, dup=0", result.stdout)
-            self.assertIn("[REPLACE] removed 2 existing trade(s)", result.stdout)
+            self.assertIn("[REPLACE] removed 3 existing trade(s) from the full trade ledger.", result.stdout)
 
             trades = json.loads(trades_path.read_text(encoding="utf-8"))
-            self.assertEqual(len(trades), 4)
+            self.assertEqual(len(trades), 3)
             by_ticker = {trade["ticker"]: trade for trade in trades}
-            self.assertEqual(by_ticker["GOOG"]["shares"], 1)
             self.assertEqual(by_ticker["NVDA"]["shares"], 33)
             self.assertEqual(by_ticker["SMH"]["shares"], 14)
             self.assertEqual(by_ticker["ARKQ"]["shares"], 2)
-            self.assertAlmostEqual(float(by_ticker["GOOG"]["cash_amount"]), 300.6001, places=4)
+            self.assertNotIn("GOOG", by_ticker)
+
+    def test_capital_xls_wrapper_replace_can_limit_scope_by_trade_date_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            states_path = tmpdir / "states.json"
+            trades_path = tmpdir / "trades.json"
+            xls_path = tmpdir / "OSHistoryDealAll-range.xls"
+
+            states_path.write_text("{}\n", encoding="utf-8")
+            seeded = [
+                _trade("2026-03-19", "2026/03/19 22:00:00", "GOOG", "BUY", 1, 300.00001, 0.60005),
+                _trade("2026-03-20", "2026/03/20 21:31:18", "NVDA", "SELL", 30, 5300.0, 10.6),
+                _trade("2026-03-21", "2026/03/21 21:34:37", "SMH", "BUY", 10, 3900.0, 7.8),
+            ]
+            trades_path.write_text(json.dumps(seeded, ensure_ascii=False, indent=2), encoding="utf-8")
+            _write_capital_xls(
+                xls_path,
+                [
+                    _capital_row("NVDA 輝達", "2026/03/20", "賣出", "177.2000", "33股", "5,847.6000", "2026/03/20 21:31:18", "11.70", "5,835.90"),
+                    _capital_row("SMH VanEck半導體ETF", "2026/03/21", "買入", "393.9320", "14股", "5,515.0500", "2026/03/21 21:34:37", "11.03", "5,526.08"),
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "update_xml.sh",
+                    str(xls_path),
+                    "--states",
+                    str(states_path),
+                    "--out",
+                    str(states_path),
+                    "--trades-file",
+                    str(trades_path),
+                    "--trades-import-mode",
+                    "replace",
+                    "--trade-date-from",
+                    "2026-03-20",
+                    "--trade-date-to",
+                    "2026-03-20",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            self.assertIn("[FILTER] trades import OSHistoryDealAll-range.xls: trade_date_et range 2026-03-20..2026-03-20 | kept=1", result.stdout)
+            self.assertIn("mode=replace", result.stdout)
+            self.assertIn("added=1, dup=0", result.stdout)
+            self.assertIn("[REPLACE] removed 1 existing trade(s)", result.stdout)
+
+            trades = json.loads(trades_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(trades), 3)
+            by_ticker = {trade["ticker"]: trade for trade in trades}
+            self.assertEqual(by_ticker["GOOG"]["shares"], 1)
+            self.assertEqual(by_ticker["NVDA"]["shares"], 33)
+            self.assertEqual(by_ticker["SMH"]["shares"], 10)
+
+    def test_capital_xls_wrapper_replace_with_empty_filtered_range_deletes_range_trades(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            states_path = tmpdir / "states.json"
+            trades_path = tmpdir / "trades.json"
+            xls_path = tmpdir / "OSHistoryDealAll-empty-range.xls"
+
+            states_path.write_text("{}\n", encoding="utf-8")
+            seeded = [
+                _trade("2026-03-19", "2026/03/19 22:00:00", "GOOG", "BUY", 1, 300.00001, 0.60005),
+                _trade("2026-03-20", "2026/03/20 21:31:18", "NVDA", "SELL", 30, 5300.0, 10.6),
+                _trade("2026-03-20", "2026/03/20 21:34:37", "SMH", "BUY", 10, 3900.0, 7.8),
+            ]
+            trades_path.write_text(json.dumps(seeded, ensure_ascii=False, indent=2), encoding="utf-8")
+            _write_capital_xls(
+                xls_path,
+                [
+                    _capital_row("ARKQ ARKQUS", "2026/03/21", "買入", "118.0000", "2股", "236.0000", "2026/03/21 21:36:32", "0.47", "236.47"),
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "update_xml.sh",
+                    str(xls_path),
+                    "--states",
+                    str(states_path),
+                    "--out",
+                    str(states_path),
+                    "--trades-file",
+                    str(trades_path),
+                    "--trades-import-mode",
+                    "replace",
+                    "--trade-date-from",
+                    "2026-03-20",
+                    "--trade-date-to",
+                    "2026-03-20",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            self.assertIn("[FILTER] trades import OSHistoryDealAll-empty-range.xls: trade_date_et range 2026-03-20..2026-03-20 | kept=0", result.stdout)
+            self.assertIn("[REPLACE] removed 2 existing trade(s) in trade_date_et range 2026-03-20..2026-03-20.", result.stdout)
+            self.assertIn("added=0, dup=0, mode=replace", result.stdout)
+
+            trades = json.loads(trades_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(trades), 1)
+            self.assertEqual(trades[0]["ticker"], "GOOG")
 
 
 if __name__ == "__main__":
