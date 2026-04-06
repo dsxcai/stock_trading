@@ -37,7 +37,17 @@
     },
     "signals": {
       "row_source": { "path": "$.signals.tactical[*]" },
-      "sort": [{ "key": { "path": "ticker" }, "order": "asc" }]
+      "sort": [
+        {
+          "key": {
+            "type": "sub",
+            "left": { "path": "ma_t" },
+            "right": { "path": "close_t" }
+          },
+          "order": "desc"
+        },
+        { "key": { "path": "ticker" }, "order": "asc" }
+      ]
     },
     "thresholds": {
       "row_source": { "path": "$.thresholds.buy_signal_close_price_thresholds[*]" },
@@ -304,7 +314,7 @@
         { "header": "Close(t-5)", "value": { "path": "close_t_minus_5_next" }, "format": "p4", "align": "right" },
         { "header": "SMA-Equivalent Threshold (strict >)", "value": { "path": "threshold_from_ma" }, "format": "p4", "align": "right" },
         { "header": "P_min (strict >)", "value": { "path": "threshold" }, "format": "p4", "align": "right" },
-        { "header": "Display", "value": { "path": "threshold" }, "format": "threshold_plus_p2", "align": "right" }
+        { "header": "Display", "value": { "path": "display" }, "align": "right" }
       ]
     },
     {

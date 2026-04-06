@@ -685,6 +685,36 @@ sell_signal = (shares_pre > 0) and (not buy_signal)
 
 If Sell is true, then `t+1_action = SELL_ALL`.
 
+### 9.3.1 Row ordering in `Signal Status`
+
+The `Signal Status` table is ordered by `B-A`, from largest to smallest:
+
+```text
+B-A = SMA(t) - Price(Now)
+```
+
+This means the report places the stocks that are farthest below their moving average near the top of the table.
+If two rows have the same `B-A`, ticker symbol is used as the tie-breaker in ascending order.
+
+### 9.4 How the `t+1 Hypothetical Trigger Close Threshold (P_min)` table is read
+
+This threshold table is used to answer a different question from `Signal Status`: what next close would be required to satisfy the tactical buy rule on `t+1`.
+
+| Field                                  | Meaning |
+| -------------------------------------- | ------- |
+| `SMA-Equivalent Threshold (strict >)`  | The minimum next close implied by the moving-average side of the rule |
+| `P_min (strict >)`                     | The stricter of the moving-average threshold and the `Close(t-5)` threshold |
+| `Display`                              | The preformatted display string for `P_min`, shown with a trailing `+` |
+
+The system computes:
+
+```text
+threshold_from_ma = SUM_{n-1} / (window - 1)
+P_min = max(threshold_from_ma, Close(t-5))
+```
+
+Accordingly, when `threshold_from_ma >= Close(t-5)`, the `SMA-Equivalent Threshold` column and the `P_min` column will be identical by design.
+
 ------
 
 ## 10. How other report fields are computed

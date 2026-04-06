@@ -98,6 +98,15 @@ def eval_expr(expr: Any, row: Dict[str, Any], root: Dict[str, Any]) -> Any:
                 return float(num) / den_f
             except Exception:
                 return None
+        if et == 'sub':
+            left = eval_expr(expr.get('left'), row, root)
+            right = eval_expr(expr.get('right'), row, root)
+            try:
+                if left is None or right is None:
+                    return None
+                return float(left) - float(right)
+            except Exception:
+                return None
         if et == 'if':
             cond = expr.get('cond')
             cond_val = eval_expr(cond, row, root) if isinstance(cond, dict) else bool(cond)
@@ -230,9 +239,9 @@ def build_dataset(schema: Dict[str, Any], states: Dict[str, Any], dataset_id: st
         rows = kept
     sort_specs = ds.get('sort') or []
     for s in reversed(sort_specs):
-        key_path = (s.get('key') or {}).get('path') if isinstance(s.get('key'), dict) else None
         order = s.get('order', 'asc')
-        rows.sort(key=lambda r: _sort_key(resolve_path(r, key_path, root=states) if key_path else None), reverse=order == 'desc')
+        key_expr = s.get('key')
+        rows.sort(key=lambda r: _sort_key(eval_expr(key_expr, r, states)), reverse=order == 'desc')
     return rows
 
 def apply_row_computed(table_spec: Dict[str, Any], rows: List[Dict[str, Any]], states: Dict[str, Any]) -> None:

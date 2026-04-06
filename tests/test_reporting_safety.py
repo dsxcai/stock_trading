@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import copy
 import unittest
+from pathlib import Path
 
 from core import reporting
 from core import state_engine
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReportingSafetyTests(unittest.TestCase):
@@ -156,6 +159,53 @@ class ReportingSafetyTests(unittest.TestCase):
         self.assertIn("- Generated At (ET): 2026/03/25 10:30:00", markdown)
         self.assertIn("| Ticker | Price (Now) |", markdown)
         self.assertIn("Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the current price.", markdown)
+
+    def test_report_spec_sorts_signal_status_by_b_minus_a_desc(self) -> None:
+        schema = reporting.load_schema(str(REPO_ROOT / "report_spec.json"))
+        states = {
+            "signals": {
+                "tactical": [
+                    {"ticker": "AAA", "close_t": 100.0, "ma_t": 110.0},
+                    {"ticker": "BBB", "close_t": 100.0, "ma_t": 120.0},
+                    {"ticker": "CCC", "close_t": 100.0, "ma_t": 100.0},
+                ]
+            }
+        }
+
+        rows = reporting.build_dataset(schema, states, "signals")
+
+        self.assertEqual([row["ticker"] for row in rows], ["BBB", "AAA", "CCC"])
+
+    def test_report_spec_uses_precomputed_threshold_display_value(self) -> None:
+        schema = reporting.load_schema(str(REPO_ROOT / "report_spec.json"))
+        states = {
+            "config": {"meta": {"doc": "Daily Investment Report"}},
+            "_report_meta": {
+                "mode": "Premarket",
+                "mode_key": "premarket",
+                "generated_at_et": "2026-03-18T08:00:00-04:00",
+                "signal_basis": {"t_et": "2026-03-17", "basis": "NYSE Close"},
+                "execution_basis": {"t_plus_1_et": "2026-03-18", "basis": "NYSE Trading Day"},
+                "version_anchor_et": "2026-03-18",
+            },
+            "thresholds": {
+                "buy_signal_close_price_thresholds": [
+                    {
+                        "ticker": "GOOG",
+                        "ma_rule": "SMA50",
+                        "ma_sum_prev": 15627.97,
+                        "close_t_minus_5_next": 308.42,
+                        "threshold_from_ma": 318.9382,
+                        "threshold": 318.9382,
+                        "display": "318.938+",
+                    }
+                ]
+            },
+        }
+
+        markdown = reporting.render_report(states, schema, "Premarket")
+
+        self.assertIn("| GOOG | SMA50 | $15,627.97 | 308.4200 | 318.9382 | 318.9382 | 318.938+ |", markdown)
 
     def test_strip_persisted_report_transients_removes_by_mode(self) -> None:
         states = {
