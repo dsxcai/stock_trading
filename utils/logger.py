@@ -7,7 +7,7 @@ import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any, Iterable, Tuple
 
 
 def default_log_path(script_name: str) -> str:
@@ -60,10 +60,10 @@ def emit(logger: logging.Logger, *parts: Any, sep: str = " ", end: str = "\n") -
     logger.log(level, message.rstrip("\n"))
 
 
-def log_run_header(logger: logging.Logger, script_name: str, args: Any) -> None:
+def log_run_header(logger: logging.Logger, script_name: str, args: Any, *, argv: Iterable[str] | None = None) -> None:
     """Write a deterministic execution header for reproducibility."""
-    argv = [script_name, *sys.argv[1:]]
+    argv_parts = [script_name, *(list(argv) if argv is not None else sys.argv[1:])]
     logger.info(f"[RUN] started_at={datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')}")
     logger.info(f"[RUN] cwd={os.getcwd()}")
-    logger.info(f"[RUN] argv={shlex.join(argv)}")
+    logger.info(f"[RUN] argv={shlex.join(argv_parts)}")
     logger.info(f"[RUN] args={json.dumps(vars(args), ensure_ascii=False, sort_keys=True)}")

@@ -7,7 +7,7 @@ from core import state_engine as runtime
 from utils.logger import configure_logging, emit, log_run_header
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--states", default="states.json", help="Input states.json path")
     parser.add_argument("--config", default="config.json", help="External config JSON path")
@@ -44,13 +44,40 @@ def main() -> None:
     parser.add_argument("--trade-date-from", default="", help="Optional ET trade-date lower bound used by trade-import filtering and replace-range")
     parser.add_argument("--trade-date-to", default="", help="Optional ET trade-date upper bound used by trade-import filtering and replace-range")
     parser.add_argument("--verify-tolerance-usd", type=float, default=1.0, help="Tolerance in USD for broker verification")
-    args = parser.parse_args()
+    return parser
 
-    logger, log_path = configure_logging("update_states", args.log_file)
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
+
+
+def _header_args(args: argparse.Namespace) -> argparse.Namespace:
+    payload = dict(vars(args))
+    if payload.get("imported_trade_batches"):
+        payload["imported_trade_batches"] = [
+            {
+                "import_path": str((batch or {}).get("import_path") or "<in-memory-import>"),
+                "trade_count": len((batch or {}).get("trades") or []),
+            }
+            for batch in payload["imported_trade_batches"]
+            if isinstance(batch, dict)
+        ]
+    return argparse.Namespace(**payload)
+
+
+def run_args(
+    args: argparse.Namespace,
+    *,
+    argv: list[str] | None = None,
+    script_name: str = "update_states.py",
+    log_name: str = "update_states",
+) -> int:
+    logger, log_path = configure_logging(log_name, getattr(args, "log_file", ""))
     runtime.print = lambda *parts, **kwargs: emit(logger, *parts, **kwargs)
     logger.info(f"[LOG] file={log_path}")
-    log_run_header(logger, "update_states.py", args)
+    log_run_header(logger, script_name, _header_args(args), argv=argv)
 
+    exit_code = 0
     try:
         exit_code = int(runtime._run_main(args) or 0)
         logger.info(f"[EXIT] code={exit_code}")
@@ -60,15 +87,19 @@ def main() -> None:
         except Exception:
             exit_code = 1
         logger.info(f"[EXIT] code={exit_code}")
-        raise
     except Exception:
         logger.error("[EXCEPTION] uncaught exception follows")
         traceback.print_exc()
+        exit_code = 1
         logger.error("[EXIT] code=1")
-        raise
     finally:
         logger.info(f"[LOG] complete file={log_path}")
+    return exit_code
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run_args(parse_args(argv), argv=argv)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

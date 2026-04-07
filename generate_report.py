@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 
 from core import reporting as runtime
 from core.report_meta import _migrate_state_schema, _normalize_mode_key
-from core.tactical_engine import compute_tactical_plan
 from core.state_engine import (
     _build_report_output,
     _compute_keep_history_rows,
@@ -25,6 +24,7 @@ from core.state_engine import (
     _resolve_runtime_report_meta,
     _update_portfolio_performance,
 )
+from core.tactical_engine import compute_tactical_plan
 from utils.config_access import config_trades_file
 from utils.logger import configure_logging, emit, log_run_header
 from utils.precision import state_engine_numeric_precision
@@ -32,7 +32,7 @@ from utils.precision import state_engine_numeric_precision
 _ET_TZ = "America/New_York"
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--states", default="states.json")
     parser.add_argument("--config", default="config.json", help="External config JSON path")
@@ -48,13 +48,20 @@ def main() -> None:
     parser.add_argument("--derive-threshold-inputs", default="force", choices=["never", "missing", "force"], help="How to derive transient threshold inputs for report rendering")
     parser.add_argument("--now-et", default="", help="Override current ET datetime for report generation metadata")
     parser.add_argument("--log-file", default="", help="Optional render log path")
-    args = parser.parse_args()
+    return parser
 
-    logger, log_path = configure_logging("generate_report", args.log_file)
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
+
+
+def run_args(args: argparse.Namespace, *, argv: list[str] | None = None) -> int:
+    logger, log_path = configure_logging("generate_report", getattr(args, "log_file", ""))
     runtime.print = lambda *parts, **kwargs: emit(logger, *parts, **kwargs)
-    log_run_header(logger, "generate_report.py", args)
+    log_run_header(logger, "generate_report.py", args, argv=argv)
     logger.info(f"[LOG] file={log_path}")
 
+    exit_code = 0
     try:
         states = json.loads(Path(args.states).read_text(encoding="utf-8"))
         config_path = args.config.strip() or str(Path(args.states).resolve().parent / "config.json")
@@ -71,14 +78,11 @@ def main() -> None:
         _ensure_trading_calendar(engine_runtime)
         _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
         _hydrate_positions_from_trade_ledger_if_needed(states, engine_runtime, trades)
-        now_et_raw = str(args.now_et or "").strip()
         report_now_et = None
+        now_et_raw = str(args.now_et or "").strip()
         if now_et_raw:
             report_now_et = datetime.fromisoformat(now_et_raw)
-            if report_now_et.tzinfo is None:
-                report_now_et = report_now_et.replace(tzinfo=ZoneInfo(_ET_TZ))
-            else:
-                report_now_et = report_now_et.astimezone(ZoneInfo(_ET_TZ))
+            report_now_et = report_now_et.replace(tzinfo=ZoneInfo(_ET_TZ)) if report_now_et.tzinfo is None else report_now_et.astimezone(ZoneInfo(_ET_TZ))
         report_meta = _resolve_runtime_report_meta(
             engine_runtime,
             args.mode,
@@ -87,14 +91,13 @@ def main() -> None:
         )
         engine_runtime["report_meta"] = dict(report_meta)
         tickers = _discover_tickers_from_config(states, engine_runtime)
-        keep_history_rows = _compute_keep_history_rows(states, engine_runtime)
         _import_csvs_into_states(
             states,
             engine_runtime,
             csv_dir=args.csv_dir,
             tickers=tickers,
             prices_now_from="close",
-            keep_history_rows=keep_history_rows,
+            keep_history_rows=_compute_keep_history_rows(states, engine_runtime),
             persist_market_snapshot=False,
             allow_incomplete_rows=bool(args.allow_incomplete_csv_rows),
         )
@@ -122,21 +125,23 @@ def main() -> None:
             market_history=engine_runtime.get("history"),
         )
         if not args.out.strip() and args.date.strip():
-            report_date = args.date.strip()
-            output_path = str(Path(args.out_dir) / f"{report_date}_{_normalize_mode_key(args.mode)}.md")
+            output_path = str(Path(args.out_dir) / f"{args.date.strip()}_{_normalize_mode_key(args.mode)}.md")
         Path(output_path).write_text(markdown, encoding="utf-8")
-        logger.info(f"[OK] wrote {output_path}")
+        runtime.print(f"[OK] wrote {output_path}")
         logger.info("[EXIT] code=0")
-    except SystemExit:
-        raise
     except Exception:
         logger.error("[EXCEPTION] uncaught exception follows")
         traceback.print_exc()
+        exit_code = 1
         logger.error("[EXIT] code=1")
-        raise
     finally:
         logger.info(f"[LOG] complete file={log_path}")
+    return exit_code
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run_args(parse_args(argv), argv=argv)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

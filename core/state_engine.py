@@ -145,16 +145,27 @@ def _load_imported_trades_json(path: str) -> List[Dict[str, Any]]:
     return trades
 
 def _trade_import_label(path: str, trades: List[Dict[str, Any]]) -> str:
-    for trade in trades:
-        if not isinstance(trade, dict):
-            continue
-        source_file = str(trade.get("source_file") or "").strip()
-        if source_file:
-            return source_file
-        source = str(trade.get("source") or "").strip()
-        if source:
-            return source
+    for key in ("source_file", "source"):
+        for trade in trades:
+            value = str((trade or {}).get(key) or "").strip() if isinstance(trade, dict) else ""
+            if value:
+                return value
     return Path(path).name
+
+
+def _iter_imported_trade_batches(args: argparse.Namespace, cash_amount_ndigits: int) -> List[Tuple[str, str, List[Dict[str, Any]]]]:
+    batches: List[Tuple[str, str, List[Dict[str, Any]]]] = []
+    for payload in getattr(args, 'imported_trade_batches', None) or []:
+        if isinstance(payload, dict):
+            import_path = str(payload.get('import_path') or payload.get('label') or '<in-memory-import>').strip() or '<in-memory-import>'
+            incoming = [dict(trade) for trade in (payload.get('trades') or []) if isinstance(trade, dict)]
+            _normalize_trades_inplace(incoming, cash_amount_ndigits=cash_amount_ndigits)
+            batches.append((_trade_import_label(import_path, incoming), import_path, incoming))
+    for import_path in getattr(args, 'imported_trades_json', None) or []:
+        incoming = _load_imported_trades_json(import_path)
+        _normalize_trades_inplace(incoming, cash_amount_ndigits=cash_amount_ndigits)
+        batches.append((_trade_import_label(import_path, incoming), import_path, incoming))
+    return batches
 
 def _save_trades_payload(trades: List[Dict[str, Any]], path: str) -> str:
     payload = json.dumps(trades, ensure_ascii=False, indent=2)
@@ -1285,48 +1296,25 @@ def _normalize_trade_date_bounds(trade_date_from: str, trade_date_to: str) -> Tu
         raise ValueError(f'invalid trade date to: {trade_date_to}')
     if start is not None and end is not None and start > end:
         raise ValueError(f'trade date from {start.isoformat()} is after trade date to {end.isoformat()}')
-    return (
-        start.isoformat() if start is not None else '',
-        end.isoformat() if end is not None else '',
-    )
+    return start.isoformat() if start is not None else '', end.isoformat() if end is not None else ''
 
 def _trade_is_within_trade_date_bounds(trade: Dict[str, Any], trade_date_from: str, trade_date_to: str) -> bool:
     trade_date_et = _normalize_trade_date_et(str(trade.get('trade_date_et') or ''))
-    if not trade_date_et:
-        return False
-    if trade_date_from and trade_date_et < trade_date_from:
-        return False
-    if trade_date_to and trade_date_et > trade_date_to:
-        return False
-    return True
+    return bool(trade_date_et) and not (trade_date_from and trade_date_et < trade_date_from) and not (trade_date_to and trade_date_et > trade_date_to)
 
-def _replace_all_trades(trades: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
-    if not isinstance(trades, list) or not trades:
-        return (trades if isinstance(trades, list) else [], 0)
-    removed = len(trades)
-    print(f'[REPLACE] removed {removed} existing trade(s) from the full trade ledger.')
-    return ([], removed)
-
-def _replace_trades_for_trade_date_range(trades: List[Dict[str, Any]], trade_date_from: str, trade_date_to: str) -> Tuple[List[Dict[str, Any]], int]:
+def _replace_trades(trades: List[Dict[str, Any]], trade_date_from: str='', trade_date_to: str='') -> Tuple[List[Dict[str, Any]], int]:
     if not isinstance(trades, list) or not trades:
         return (trades if isinstance(trades, list) else [], 0)
     if not (trade_date_from or trade_date_to):
-        return (trades, 0)
-    keep: List[Dict[str, Any]] = []
-    removed: List[Dict[str, Any]] = []
-    for trade in trades:
-        if not isinstance(trade, dict):
-            keep.append(trade)
-            continue
-        if _trade_is_within_trade_date_bounds(trade, trade_date_from, trade_date_to):
-            removed.append(trade)
-        else:
-            keep.append(trade)
+        print(f'[REPLACE] removed {len(trades)} existing trade(s) from the full trade ledger.')
+        return ([], len(trades))
+    keep = [trade for trade in trades if not isinstance(trade, dict) or not _trade_is_within_trade_date_bounds(trade, trade_date_from, trade_date_to)]
+    removed = len(trades) - len(keep)
     if removed:
         start = trade_date_from or 'min'
         end = trade_date_to or 'max'
-        print(f'[REPLACE] removed {len(removed)} existing trade(s) in trade_date_et range {start}..{end}.')
-    return (keep if removed else trades, len(removed))
+        print(f'[REPLACE] removed {removed} existing trade(s) in trade_date_et range {start}..{end}.')
+    return (keep if removed else trades, removed)
 
 def _sort_key_trade_for_portfolio(t: Dict[str, Any]) -> tuple:
     return (_normalize_trade_date_et(str(t.get('trade_date_et') or '')), _normalize_time_tw(str(t.get('time_tw') or '')), int(t.get('trade_id') or 0))
@@ -1579,7 +1567,7 @@ def _mode_required_operations_requested(args: argparse.Namespace) -> bool:
     return bool(str(args.tickers or '').strip() or bool(getattr(args, 'render_report', False)) or getattr(args, 'broker_investment_total_usd', None) is not None or (getattr(args, 'tactical_cash_usd', None) is not None))
 
 def _standalone_update_allowed_without_mode(args: argparse.Namespace) -> bool:
-    return bool(getattr(args, 'imported_trades_json', None) or getattr(args, 'cash_adjust_usd', None) is not None or getattr(args, 'cash_transfer_to_reserve_usd', None) is not None or (getattr(args, 'initial_investment_usd', None) is not None))
+    return bool(getattr(args, 'imported_trade_batches', None) or getattr(args, 'imported_trades_json', None) or getattr(args, 'cash_adjust_usd', None) is not None or getattr(args, 'cash_transfer_to_reserve_usd', None) is not None or getattr(args, 'initial_investment_usd', None) is not None)
 
 
 def _has_persistent_state_updates_requested(args: argparse.Namespace) -> bool:
@@ -1704,12 +1692,13 @@ def _run_main(args: argparse.Namespace) -> int:
         str(getattr(args, 'trade_date_from', '') or '').strip(),
         str(getattr(args, 'trade_date_to', '') or '').strip(),
     )
-    if args.imported_trades_json:
-        for import_path in args.imported_trades_json:
+    imported_trade_batches = _iter_imported_trade_batches(
+        args,
+        cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]),
+    )
+    if imported_trade_batches:
+        for import_label, import_path, incoming in imported_trade_batches:
             try:
-                incoming = _load_imported_trades_json(import_path)
-                _normalize_trades_inplace(incoming, cash_amount_ndigits=int(numeric_precision["trade_cash_amount"]))
-                import_label = _trade_import_label(import_path, incoming)
                 if trade_date_from or trade_date_to:
                     incoming = [
                         trade for trade in incoming
@@ -1738,10 +1727,7 @@ def _run_main(args: argparse.Namespace) -> int:
                             f"append import conflict detected for {import_label}: {detail}"
                         )
                 if mode == 'replace':
-                    if trade_date_from or trade_date_to:
-                        trades, removed_trade_count = _replace_trades_for_trade_date_range(trades, trade_date_from, trade_date_to)
-                    else:
-                        trades, removed_trade_count = _replace_all_trades(trades)
+                    trades, removed_trade_count = _replace_trades(trades, trade_date_from, trade_date_to)
                 added, dup = _upsert_trades(
                     trades,
                     incoming,
