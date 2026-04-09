@@ -502,6 +502,27 @@ class GuiApplication:
       font-size: 1.1rem;
       font-weight: 700;
     }}
+    .busy-progress-track {{
+      width: 100%;
+      height: 12px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #e8dfd3;
+      border: 1px solid rgba(29, 92, 99, 0.1);
+    }}
+    .busy-progress-fill {{
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #2d6f78, #d08c60);
+      transition: width 180ms ease;
+    }}
+    .busy-progress-value {{
+      font-size: 1.6rem;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--accent);
+    }}
     .busy-spinner {{
       width: 44px;
       height: 44px;
@@ -531,6 +552,12 @@ class GuiApplication:
       <div class="busy-spinner" aria-hidden="true"></div>
       <div class="busy-title">Running</div>
       <div id="busy_message" class="subtle">Please wait. The page will refresh automatically when the operation finishes.</div>
+      <div class="subtle">Estimated progress</div>
+      <div id="busy_progress_track" class="busy-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="busy_progress_fill" class="busy-progress-fill"></div>
+      </div>
+      <div id="busy_progress_value" class="busy-progress-value">0%</div>
+      <div id="busy_phase" class="subtle">Preparing request...</div>
     </div>
   </div>
   <div id="live_status" class="visually-hidden" aria-live="polite"></div>
@@ -551,7 +578,7 @@ class GuiApplication:
       </section>
       <section class="card stack">
         <h2>Daily Run</h2>
-        <form class="stack" method="post" action="/run-mode" data-busy-message="Running the daily workflow, please wait...">
+        <form class="stack" method="post" action="/run-mode" data-busy-message="Running the daily workflow, please wait..." data-async-submit="1" data-progress-kind="daily-run">
           <div class="inline">
             <input id="force_mode" type="checkbox" name="force_mode" value="1">
             <label for="force_mode" style="gap:0;">Allow force mode</label>
@@ -569,7 +596,7 @@ class GuiApplication:
       </section>
       <section class="card stack">
         <h2>Generate Report</h2>
-        <form class="stack" method="post" action="/generate-report" data-busy-message="Generating the report, please wait...">
+        <form class="stack" method="post" action="/generate-report" data-busy-message="Generating the report, please wait..." data-async-submit="1" data-progress-kind="generate-report">
           <label>Mode
             <select name="mode">
               <option value="Premarket">Premarket</option>
@@ -589,7 +616,7 @@ class GuiApplication:
       </section>
       <section class="card stack">
         <h2>Import Trades</h2>
-        <form class="stack" method="post" action="/import-trades" enctype="multipart/form-data" data-busy-message="Importing trades and refreshing the report, please wait...">
+        <form class="stack" method="post" action="/import-trades" enctype="multipart/form-data" data-busy-message="Importing trades and refreshing the report, please wait..." data-async-submit="1" data-progress-kind="import-trades">
           <label>Capital XLS Upload
             <input type="file" name="capital_xls_file" accept=".xls,.html,.htm">
           </label>
@@ -618,7 +645,7 @@ class GuiApplication:
       </section>
       <section class="card stack">
         <h2>Cash Adjustment</h2>
-        <form class="stack" method="post" action="/cash-adjust" data-busy-message="Recording the cash adjustment and refreshing the report, please wait...">
+        <form class="stack" method="post" action="/cash-adjust" data-busy-message="Recording the cash adjustment and refreshing the report, please wait..." data-async-submit="1" data-progress-kind="cash-adjust">
           <label>Amount (USD)
             <input type="number" name="cash_adjust_usd" step="0.01" placeholder="-3600 for withdrawal, 2000 for deposit">
           </label>
@@ -668,10 +695,136 @@ class GuiApplication:
     const overlay = document.getElementById("busy_overlay");
     const busyMessage = document.getElementById("busy_message");
     const liveStatus = document.getElementById("live_status");
+    const busyProgressTrack = document.getElementById("busy_progress_track");
+    const busyProgressFill = document.getElementById("busy_progress_fill");
+    const busyProgressValue = document.getElementById("busy_progress_value");
+    const busyPhase = document.getElementById("busy_phase");
     const forms = document.querySelectorAll("form[data-busy-message]");
-    if (!overlay || !busyMessage || !liveStatus || !forms.length) {{
+    if (!overlay || !busyMessage || !liveStatus || !busyProgressTrack || !busyProgressFill || !busyProgressValue || !busyPhase || !forms.length) {{
       return;
     }}
+    let progressTimer = null;
+    const progressProfiles = {{
+      "daily-run": {{
+        estimateMs: 18000,
+        phases: [
+          {{ pct: 5, text: "Preparing run..." }},
+          {{ pct: 18, text: "Refreshing market data..." }},
+          {{ pct: 42, text: "Repricing positions and totals..." }},
+          {{ pct: 68, text: "Computing signals and actions..." }},
+          {{ pct: 86, text: "Rendering report output..." }},
+          {{ pct: 96, text: "Finalizing files..." }},
+        ],
+      }},
+      "generate-report": {{
+        estimateMs: 9000,
+        phases: [
+          {{ pct: 5, text: "Preparing report inputs..." }},
+          {{ pct: 28, text: "Loading market history..." }},
+          {{ pct: 56, text: "Computing report sections..." }},
+          {{ pct: 84, text: "Rendering markdown output..." }},
+          {{ pct: 96, text: "Finalizing files..." }},
+        ],
+      }},
+      "import-trades": {{
+        estimateMs: 14000,
+        phases: [
+          {{ pct: 5, text: "Uploading and parsing trades..." }},
+          {{ pct: 24, text: "Normalizing imported trades..." }},
+          {{ pct: 48, text: "Updating state and trade files..." }},
+          {{ pct: 74, text: "Refreshing the selected report..." }},
+          {{ pct: 96, text: "Finalizing files..." }},
+        ],
+      }},
+      "cash-adjust": {{
+        estimateMs: 6000,
+        phases: [
+          {{ pct: 5, text: "Recording cash adjustment..." }},
+          {{ pct: 42, text: "Updating state and totals..." }},
+          {{ pct: 78, text: "Refreshing the selected report..." }},
+          {{ pct: 96, text: "Finalizing files..." }},
+        ],
+      }},
+      "save-config": {{
+        estimateMs: 7000,
+        phases: [
+          {{ pct: 5, text: "Saving config..." }},
+          {{ pct: 45, text: "Refreshing the selected report..." }},
+          {{ pct: 96, text: "Finalizing files..." }},
+        ],
+      }},
+      "default": {{
+        estimateMs: 7000,
+        phases: [
+          {{ pct: 5, text: "Preparing request..." }},
+          {{ pct: 55, text: "Running operation..." }},
+          {{ pct: 96, text: "Finalizing..." }},
+        ],
+      }},
+    }};
+    const updateProgress = (percent, phaseText) => {{
+      const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+      busyProgressFill.style.width = clamped + "%";
+      busyProgressValue.textContent = clamped + "%";
+      busyProgressTrack.setAttribute("aria-valuenow", String(clamped));
+      busyPhase.textContent = phaseText || "Running...";
+    }};
+    const progressProfileFor = (form) => {{
+      const kind = (form.dataset.progressKind || "default").trim();
+      return progressProfiles[kind] || progressProfiles.default;
+    }};
+    const progressPercentFor = (estimateMs, elapsedMs) => {{
+      const safeEstimate = Math.max(Number(estimateMs) || 1, 1);
+      const ratio = Math.min(Math.max(elapsedMs, 0) / safeEstimate, 1);
+      const eased = 1 - Math.pow(1 - ratio, 3);
+      return Math.min(95, Math.max(4, Math.round(4 + (eased * 91))));
+    }};
+    const progressPhaseFor = (phases, percent) => {{
+      let current = "Running...";
+      phases.forEach((phase) => {{
+        if (percent >= phase.pct) {{
+          current = phase.text;
+        }}
+      }});
+      return current;
+    }};
+    const stopProgressTimer = () => {{
+      if (progressTimer !== null) {{
+        window.clearInterval(progressTimer);
+        progressTimer = null;
+      }}
+    }};
+    const resetBusyState = () => {{
+      stopProgressTimer();
+      document.body.classList.remove("is-busy");
+      overlay.setAttribute("aria-hidden", "true");
+      updateProgress(0, "Preparing request...");
+      forms.forEach((form) => {{
+        form.dataset.submitting = "0";
+      }});
+      document.querySelectorAll("button").forEach((button) => {{
+        button.disabled = false;
+        button.classList.remove("is-submitting");
+        button.removeAttribute("aria-disabled");
+      }});
+    }};
+    const startEstimatedProgress = (form) => {{
+      stopProgressTimer();
+      const profile = progressProfileFor(form);
+      const startedAt = Date.now();
+      const tick = () => {{
+        const elapsedMs = Date.now() - startedAt;
+        const percent = progressPercentFor(profile.estimateMs, elapsedMs);
+        updateProgress(percent, progressPhaseFor(profile.phases, percent));
+      }};
+      tick();
+      progressTimer = window.setInterval(tick, 180);
+    }};
+    const waitForPaint = () => new Promise((resolve) => {{
+      window.requestAnimationFrame(() => {{
+        window.requestAnimationFrame(resolve);
+      }});
+    }});
     const setBusyState = (form, submitter) => {{
       if (form.dataset.submitting === "1") {{
         return false;
@@ -703,11 +856,44 @@ class GuiApplication:
       overlay.setAttribute("aria-hidden", "false");
       busyMessage.textContent = message;
       liveStatus.textContent = message;
+      updateProgress(4, "Preparing request...");
       return true;
     }};
     forms.forEach((form) => {{
       form.addEventListener("submit", (event) => {{
-        if (!setBusyState(form, event.submitter || null)) {{
+        const submitter = event.submitter || null;
+        if (form.dataset.asyncSubmit === "1") {{
+          event.preventDefault();
+          if (!setBusyState(form, submitter)) {{
+            return;
+          }}
+          startEstimatedProgress(form);
+          void (async () => {{
+            try {{
+              await waitForPaint();
+              const payload = new FormData(form);
+              if (submitter && submitter.name) {{
+                payload.append(submitter.name, submitter.value);
+              }}
+              const response = await window.fetch(form.action, {{
+                method: (form.method || "POST").toUpperCase(),
+                body: payload,
+                redirect: "follow",
+                credentials: "same-origin",
+              }});
+              updateProgress(100, "Loading updated page...");
+              liveStatus.textContent = "Operation complete. Loading updated page...";
+              window.location.assign((response && response.url) ? response.url : "/");
+            }} catch (error) {{
+              resetBusyState();
+              const message = (error && error.message) ? error.message : "The operation failed before the server responded.";
+              liveStatus.textContent = message;
+              window.alert(message);
+            }}
+          }})();
+          return;
+        }}
+        if (!setBusyState(form, submitter)) {{
           event.preventDefault();
         }}
       }});
@@ -760,7 +946,7 @@ class GuiApplication:
                 "</tr>"
             )
         return (
-            '<form class="stack" method="post" action="/save-config" data-busy-message="Saving the config and refreshing the report, please wait...">'
+            '<form class="stack" method="post" action="/save-config" data-busy-message="Saving the config and refreshing the report, please wait..." data-async-submit="1" data-progress-kind="save-config">'
             '<table class="config-table">'
             '<thead><tr><th>Ticker</th><th>Enable</th><th>SMA</th></tr></thead>'
             f'<tbody>{"".join(rows)}</tbody>'
