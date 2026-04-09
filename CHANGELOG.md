@@ -6,7 +6,8 @@ The format is inspired by Keep a Changelog, and this project uses semantic versi
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Added
+- GUI cash-adjustment controls for recording external deposits and withdrawals through `update_states.py --cash-adjust-usd`, with optional notes and selected-report refresh.
 
 ## [1.2] - 2026-04-03
 

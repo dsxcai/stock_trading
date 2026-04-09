@@ -398,6 +398,53 @@ class GuiServices:
         refreshed.message = f"Trades import succeeded, but refreshing the selected report failed: {refreshed.message}"
         return refreshed
 
+    def run_cash_adjustment(
+        self,
+        amount_usd: str | float,
+        *,
+        cash_adjust_note: str = "",
+        selected_report_path: str = "",
+    ) -> OperationResult:
+        amount_raw = "" if amount_usd is None else str(amount_usd).strip()
+        if not amount_raw:
+            raise ValueError("Cash adjustment amount is required")
+        try:
+            amount_value = float(amount_raw)
+        except Exception as exc:
+            raise ValueError("Cash adjustment amount must be a number") from exc
+        command = [
+            sys.executable,
+            "update_states.py",
+            "--states",
+            "states.json",
+            "--out",
+            "states.json",
+            "--config",
+            "config.json",
+            "--trades-file",
+            "trades.json",
+            "--cash-adjust-usd",
+            format(amount_value, "g"),
+        ]
+        note_value = str(cash_adjust_note or "").strip()
+        if note_value:
+            command.extend(["--cash-adjust-note", note_value])
+        primary = self._run_command(command, name="Cash adjustment")
+        if not primary.success:
+            return primary
+        refreshed = self.refresh_selected_report(selected_report_path)
+        if refreshed is None:
+            return primary
+        if refreshed.success:
+            primary.stdout = "\n\n".join(part for part in [primary.stdout.strip(), refreshed.stdout.strip()] if part)
+            primary.log_path = refreshed.log_path or primary.log_path
+            primary.report_path = refreshed.report_path
+            primary.report_json_path = refreshed.report_json_path
+            primary.message += f" Refreshed {Path(refreshed.report_path).name}."
+            return primary
+        refreshed.message = f"Cash adjustment succeeded, but refreshing the selected report failed: {refreshed.message}"
+        return refreshed
+
     def refresh_selected_report(
         self,
         selected_report_path: str,

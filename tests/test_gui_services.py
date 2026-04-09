@@ -203,6 +203,33 @@ class GuiServicesTests(unittest.TestCase):
             self.assertIn("--trades-import-mode", captured["command"])
             self.assertEqual(captured["command"][-1], "replace")
 
+    def test_run_cash_adjustment_uses_update_states_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_base_repo(root)
+            services = GuiServices(root)
+            captured = {}
+
+            def fake_run_command(command, *, name):
+                captured["command"] = list(command)
+                return OperationResult(
+                    name=name,
+                    success=True,
+                    returncode=0,
+                    command=" ".join(command),
+                    stdout="",
+                    message="ok",
+                )
+
+            with mock.patch.object(services, "_run_command", side_effect=fake_run_command):
+                result = services.run_cash_adjustment("-3600", cash_adjust_note="wire out")
+
+            self.assertTrue(result.success)
+            self.assertEqual(captured["command"][:2], [sys.executable, "update_states.py"])
+            self.assertEqual(captured["command"][captured["command"].index("--out") + 1], "states.json")
+            self.assertEqual(captured["command"][captured["command"].index("--cash-adjust-usd") + 1], "-3600")
+            self.assertEqual(captured["command"][captured["command"].index("--cash-adjust-note") + 1], "wire out")
+
 
 class GuiServerTests(unittest.TestCase):
     def _write_base_repo(self, root: Path) -> None:
@@ -248,7 +275,12 @@ class GuiServerTests(unittest.TestCase):
             self.assertIn('action="/server-control"', rendered)
             self.assertIn('action="/delete-report"', rendered)
             self.assertIn('action="/delete-all-reports"', rendered)
+            self.assertIn('action="/cash-adjust"', rendered)
             self.assertIn("Delete All Reports", rendered)
+            self.assertIn("Cash Adjustment", rendered)
+            self.assertIn('name="cash_adjust_usd"', rendered)
+            self.assertIn('name="cash_adjust_note"', rendered)
+            self.assertNotIn('id="allow_incomplete_cash_adjust"', rendered)
             self.assertIn('class="danger report-delete"', rendered)
             self.assertIn('>X</button>', rendered)
             self.assertIn("if (button !== submitter)", rendered)

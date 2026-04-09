@@ -46,7 +46,8 @@ The main screen currently supports the following:
 - generate a report for a selected mode and report date
 - import Capital XLS trade history with `replace` or `append`
 - optionally limit Capital XLS imports to an ET trade-date range before `append` or `replace` is applied
-- regenerate the currently selected report automatically after imports or config changes when the target report can be identified
+- record external cash deposits or withdrawals with a signed USD amount and optional note
+- regenerate the currently selected report automatically after imports, cash adjustments, or config changes when the target report can be identified
 - edit `state_engine.strategy.tactical.indicators` in `config.json`
 - select recent markdown reports and switch between rendered markdown and raw markdown
 - inspect the latest operation status and highlighted error output
@@ -56,7 +57,7 @@ The main screen currently supports the following:
 
 The GUI is split into two areas:
 
-- left side: operational controls such as Daily Run, Generate Report, Import Trades, Signal Config, and Recent Reports
+- left side: operational controls such as Daily Run, Generate Report, Import Trades, Cash Adjustment, Signal Config, and Recent Reports
 - right side: the main viewer, with `Report` and `Status` tabs
 
 The `Report` tab renders the selected markdown report directly in the GUI. The `Status` tab shows the latest operation result, including the report path, log path, exit code, and captured log output. If an operation fails, error lines are highlighted in red.
@@ -66,7 +67,7 @@ The `Report` tab renders the selected markdown report directly in the GUI. The `
 The current GUI is intentionally focused on routine workflows. A few tasks are still better handled from the CLI:
 
 - initializing an empty runtime directory from scratch still requires creating the local runtime files once
-- direct cash-only operations such as `--initial-investment-usd`, `--cash-adjust-usd`, and `--cash-transfer-to-reserve-usd` are not yet exposed in the GUI
+- direct cash-only operations such as `--initial-investment-usd` and `--cash-transfer-to-reserve-usd` are not yet exposed in the GUI
 - broker reconciliation arguments such as `--broker-investment-total-usd` are still CLI-first
 - the GUI operates on the same local `config.json`, `states.json`, `trades.json`, `data/`, and `report/` files as the CLI
 

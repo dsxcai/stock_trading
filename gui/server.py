@@ -617,6 +617,19 @@ class GuiApplication:
         </form>
       </section>
       <section class="card stack">
+        <h2>Cash Adjustment</h2>
+        <form class="stack" method="post" action="/cash-adjust" data-busy-message="Recording the cash adjustment and refreshing the report, please wait...">
+          <label>Amount (USD)
+            <input type="number" name="cash_adjust_usd" step="0.01" placeholder="-3600 for withdrawal, 2000 for deposit">
+          </label>
+          <label>Note
+            <input type="text" name="cash_adjust_note" placeholder="optional note">
+          </label>
+          <div class="form-note">Use a positive amount for a deposit and a negative amount for a withdrawal. On success, the GUI will update <code>states.json</code> and regenerate the currently selected report when that report can be identified by date and mode.</div>
+          <button type="submit">Record Cash Adjustment</button>
+        </form>
+      </section>
+      <section class="card stack">
         <h2>Signal Config</h2>
         {self._render_config_editor(signal_config)}
       </section>
@@ -962,6 +975,16 @@ def make_handler(app: GuiApplication):
                                 cleanup_path.unlink()
                             except OSError:
                                 pass
+                    if result.success and result.report_path:
+                        app.set_selected_report(result.report_path)
+                    app.set_last_result(result)
+                    return self._redirect_home()
+                if parsed.path == "/cash-adjust":
+                    result = app.services.run_cash_adjustment(
+                        fields.get("cash_adjust_usd", ""),
+                        cash_adjust_note=fields.get("cash_adjust_note", ""),
+                        selected_report_path=app.snapshot().selected_report_path,
+                    )
                     if result.success and result.report_path:
                         app.set_selected_report(result.report_path)
                     app.set_last_result(result)
