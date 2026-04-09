@@ -33,11 +33,11 @@ Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the c
 ## Signal Status
 | Ticker | A: Price (Now) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |
 | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: |
+| MSFT | 399.4100 | SMA50 | 426.2154 | 405.7600 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
+| GOOG | 309.4100 | SMA50 | 318.9058 | 306.9300 | FALSE | TRUE | FALSE | 0 | NO_ACTION | 0 |
 | AAPL | 254.2300 | SMA50 | 261.9912 | 260.8300 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
 | AMZN | 215.2000 | SMA50 | 222.6984 | 214.3300 | FALSE | TRUE | FALSE | 0 | NO_ACTION | 0 |
-| GOOG | 309.4100 | SMA50 | 318.9058 | 306.9300 | FALSE | TRUE | FALSE | 0 | NO_ACTION | 0 |
 | INDA | 48.5200 | SMA100 | 53.0637 | 49.9300 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
-| MSFT | 399.4100 | SMA50 | 426.2154 | 405.7600 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
 | NVDA | 181.9300 | SMA50 | 185.2566 | 184.7700 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
 | SMH | 396.8800 | SMA100 | 377.1832 | 397.3300 | TRUE | FALSE | FALSE | 29 | SELL_ALL | 29 |
 

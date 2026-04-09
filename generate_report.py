@@ -9,27 +9,24 @@ from zoneinfo import ZoneInfo
 
 from core import reporting as runtime
 from core.report_meta import _migrate_state_schema, _normalize_mode_key
+from core.report_context import _ensure_trading_calendar, _resolve_runtime_report_meta
+from core.report_output import _build_report_output
+from core.runtime_io import _load_runtime_config, _load_trades_payload
 from core.state_engine import (
-    _build_report_output,
     _compute_keep_history_rows,
     _discover_tickers_from_config,
     _ensure_cash_buckets,
-    _ensure_trading_calendar,
     _hydrate_positions_from_trade_ledger_if_needed,
     _import_csvs_into_states,
-    _load_trades_payload,
-    _load_runtime_config,
     _rebuild_market_snapshot_from_history,
     _reprice_and_totals,
-    _resolve_runtime_report_meta,
     _update_portfolio_performance,
 )
 from core.tactical_engine import compute_tactical_plan
 from utils.config_access import config_trades_file
+from utils.dates import ET_TZ
 from utils.logger import configure_logging, emit, log_run_header
 from utils.precision import state_engine_numeric_precision
-
-_ET_TZ = "America/New_York"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,7 +79,7 @@ def run_args(args: argparse.Namespace, *, argv: list[str] | None = None) -> int:
         now_et_raw = str(args.now_et or "").strip()
         if now_et_raw:
             report_now_et = datetime.fromisoformat(now_et_raw)
-            report_now_et = report_now_et.replace(tzinfo=ZoneInfo(_ET_TZ)) if report_now_et.tzinfo is None else report_now_et.astimezone(ZoneInfo(_ET_TZ))
+            report_now_et = report_now_et.replace(tzinfo=ZoneInfo(ET_TZ)) if report_now_et.tzinfo is None else report_now_et.astimezone(ZoneInfo(ET_TZ))
         report_meta = _resolve_runtime_report_meta(
             engine_runtime,
             args.mode,

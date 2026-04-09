@@ -6,7 +6,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from core.models import OHLCVRow, SignalInputs, ThresholdInputs
-from utils.parsers import _to_yyyy_mm_dd
+from utils.dates import _to_yyyy_mm_dd
 from utils.precision import format_currency, format_fixed
 
 _REQUIRED_PRICE_COLUMNS = ("Open", "High", "Low", "Close")

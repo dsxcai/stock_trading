@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import update_states as update_states_cli
 from core.reconciliation import _first_token_ticker, _num_from_cell
-from utils.parsers import _normalize_time_tw, _normalize_trade_date_et
+from utils.dates import _normalize_time_tw, _normalize_trade_date_et
 from utils.precision import load_state_engine_numeric_precision
 
 _CAPITAL_XLS_REQUIRED_HEADERS: Tuple[str, ...] = (

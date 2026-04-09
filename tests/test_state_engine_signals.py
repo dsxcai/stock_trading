@@ -874,6 +874,30 @@ class StateEngineModeGateTests(unittest.TestCase):
 
         self.assertEqual(states["portfolio"]["positions"], [{"ticker": "AAA", "bucket": "tactical", "shares": 2, "cost_usd": 101.0}])
 
+    def test_rebuild_market_snapshot_keeps_active_ticker_keys_without_history(self) -> None:
+        states = {"portfolio": {"positions": [{"ticker": "AAA", "shares": 1}]}, "market": {"prices_now": {"STALE": 9.0}}}
+        runtime = {
+            "config": {
+                "portfolio": {"buckets": {"core": {"tickers": ["AAA"]}},
+                },
+                "strategy": {"tactical": {"indicators": {"QQQ": "SMA100"}}},
+                "data": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+                "reporting": {"numeric_precision": _numeric_precision()},
+            },
+            "history": {
+                "AAA": {"rows": [{"Date": "2026-03-17", "Close": 10.0}]},
+                "TWD=X": {"rows": [{"Date": "2026-03-26", "Close": 32.5}]},
+            },
+            "report_meta": {"signal_basis": {"t_et": "2026-03-17"}},
+        }
+
+        state_engine._rebuild_market_snapshot_from_history(states, runtime)
+
+        self.assertEqual(
+            states["market"]["prices_now"],
+            {"AAA": 10.0, "QQQ": None, "TWD=X": 32.5},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

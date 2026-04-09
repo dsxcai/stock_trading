@@ -1,17 +1,33 @@
 from __future__ import annotations
 import argparse
-import copy
 import csv
-import json
 import os
 import re
 from zoneinfo import ZoneInfo
-from datetime import datetime, date, time, timedelta, timezone
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.models import ImportResult, ReportContext
+from core.models import ImportResult
 from core.report_bundle import build_report_root, ensure_report_root_fields
+from core.report_context import (
+    _ensure_trading_calendar,
+    _next_trading_day_et_from_states,
+    _parse_broker_asof,
+    _prev_trading_day_et_from_states,
+    _report_date_from_meta,
+    _report_meta_from_context,
+    _report_meta_from_mode_dates,
+    _report_meta_from_report_date,
+    _resolve_report_context,
+    _resolve_runtime_report_meta,
+)
+from core.report_output import (
+    _build_report_json_output_path,
+    _build_report_output,
+    _build_report_output_path,
+    _render_report_output,
+)
 from core.report_meta import _effective_report_meta, _migrate_state_schema, _normalize_mode_key
 from core.reconciliation import (
     _find_trade_conflicts,
@@ -22,6 +38,24 @@ from core.reconciliation import (
     _upsert_trades,
     _verify_holdings_with_broker_investment_total,
 )
+from core.runtime_io import (
+    _compact_persistent_states,
+    _compact_trade_row,
+    _load_json,
+    _load_runtime_config,
+    _load_trades_payload,
+    _market_history_rows_map,
+    _round_selected_numeric_fields,
+    _runtime_config,
+    _runtime_data_config,
+    _runtime_history,
+    _runtime_numeric_precision,
+    _runtime_report_meta,
+    _runtime_signal_basis_day,
+    _save_json,
+    _save_trades_payload,
+    _strip_persisted_report_transients,
+)
 from core.strategy import (
     _dedupe_by_date_keep_last,
     _fmt_usd,
@@ -30,6 +64,12 @@ from core.strategy import (
     _read_ohlcv_csv,
 )
 from core.tactical_engine import apply_tactical_plan, compute_tactical_plan
+from core.trade_imports import (
+    _iter_imported_trade_batches,
+    _normalize_trade_date_bounds,
+    _replace_trades,
+    _trade_is_within_trade_date_bounds,
+)
 from utils.config_access import (
     config_buckets,
     config_csv_sources,
@@ -38,533 +78,18 @@ from utils.config_access import (
     config_trades_file,
     config_trading_calendar,
     discover_state_engine_tickers,
-    load_state_engine_config,
 )
-from utils.parsers import (
+from utils.dates import (
+    ET_TZ,
     _normalize_time_tw,
     _normalize_trade_date_et,
     _parse_ymd_loose,
-    _safe_float,
-    _safe_int,
     _to_yyyy_mm_dd,
     _trade_time_tw_to_et_dt,
 )
+from utils.parsers import _safe_float, _safe_int
 from utils.precision import format_fixed, round_with_precision, state_engine_numeric_precision
-from utils.trading_calendar import (
-    closed_reason,
-    closed_set_for_year_block as _closed_set_for_year_block,
-    early_close_payload,
-    is_weekend_et as _is_weekend_et,
-)
-
-def _load_json(path: str) -> Dict[str, Any]:
-    return json.loads(Path(path).read_text(encoding='utf-8'))
-
-def _load_runtime_config(path: str) -> Dict[str, Any]:
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(path)
-    return load_state_engine_config(path)
-
-def _runtime_config(runtime: Dict[str, Any]) -> Dict[str, Any]:
-    cfg = runtime.get('config') or {}
-    return cfg if isinstance(cfg, dict) else {}
-
-
-def _runtime_numeric_precision(runtime: Dict[str, Any]) -> Dict[str, int]:
-    return state_engine_numeric_precision(_runtime_config(runtime))
-
-
-def _runtime_data_config(runtime: Dict[str, Any]) -> Dict[str, Any]:
-    cfg = _runtime_config(runtime)
-    data = cfg.get('data')
-    if not isinstance(data, dict):
-        data = {}
-        cfg['data'] = data
-    return data
-
-def _runtime_history(runtime: Dict[str, Any]) -> Dict[str, Any]:
-    hist = runtime.get('history')
-    if not isinstance(hist, dict):
-        hist = {}
-        runtime['history'] = hist
-    return hist
-
-def _runtime_report_meta(runtime: Dict[str, Any]) -> Dict[str, Any]:
-    meta = runtime.get('report_meta')
-    return dict(meta) if isinstance(meta, dict) else {}
-
-def _runtime_signal_basis_day(runtime: Dict[str, Any]) -> Optional[str]:
-    meta = _runtime_report_meta(runtime)
-    signal_basis = meta.get('signal_basis') or {}
-    signal_day = str(signal_basis.get('t_et') or '').strip()
-    if not signal_day:
-        return None
-    try:
-        return _to_yyyy_mm_dd(signal_day)
-    except Exception:
-        return None
-
-def _save_json(obj: Dict[str, Any], path: str) -> str:
-    payload = json.dumps(obj, ensure_ascii=False, indent=2)
-    p = Path(path)
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(payload, encoding='utf-8')
-        return str(p)
-    except PermissionError:
-        fallback = p.with_name(f'{p.stem}.new{p.suffix}')
-        fallback.parent.mkdir(parents=True, exist_ok=True)
-        fallback.write_text(payload, encoding='utf-8')
-        print(f'[WARN] Cannot write {p} (permission denied). Wrote fallback: {fallback}')
-        return str(fallback)
-
-def _load_trades_payload(path: str) -> Optional[List[Dict[str, Any]]]:
-    p = Path(path)
-    if not p.exists():
-        return None
-    obj = json.loads(p.read_text(encoding='utf-8'))
-    if isinstance(obj, list):
-        out = []
-        for t in obj:
-            if isinstance(t, dict):
-                out.append(dict(t))
-        return out
-    if isinstance(obj, dict) and isinstance(obj.get('trades'), list):
-        out = []
-        for t in obj.get('trades') or []:
-            if isinstance(t, dict):
-                out.append(dict(t))
-        return out
-    return None
-
-def _load_imported_trades_json(path: str) -> List[Dict[str, Any]]:
-    trades = _load_trades_payload(path)
-    if trades is None:
-        raise ValueError(f"{path}: imported trades JSON must be a list or an object with a 'trades' array")
-    return trades
-
-def _trade_import_label(path: str, trades: List[Dict[str, Any]]) -> str:
-    for key in ("source_file", "source"):
-        for trade in trades:
-            value = str((trade or {}).get(key) or "").strip() if isinstance(trade, dict) else ""
-            if value:
-                return value
-    return Path(path).name
-
-
-def _iter_imported_trade_batches(args: argparse.Namespace, cash_amount_ndigits: int) -> List[Tuple[str, str, List[Dict[str, Any]]]]:
-    batches: List[Tuple[str, str, List[Dict[str, Any]]]] = []
-    for payload in getattr(args, 'imported_trade_batches', None) or []:
-        if isinstance(payload, dict):
-            import_path = str(payload.get('import_path') or payload.get('label') or '<in-memory-import>').strip() or '<in-memory-import>'
-            incoming = [dict(trade) for trade in (payload.get('trades') or []) if isinstance(trade, dict)]
-            _normalize_trades_inplace(incoming, cash_amount_ndigits=cash_amount_ndigits)
-            batches.append((_trade_import_label(import_path, incoming), import_path, incoming))
-    for import_path in getattr(args, 'imported_trades_json', None) or []:
-        incoming = _load_imported_trades_json(import_path)
-        _normalize_trades_inplace(incoming, cash_amount_ndigits=cash_amount_ndigits)
-        batches.append((_trade_import_label(import_path, incoming), import_path, incoming))
-    return batches
-
-def _save_trades_payload(trades: List[Dict[str, Any]], path: str) -> str:
-    payload = json.dumps(trades, ensure_ascii=False, indent=2)
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(payload, encoding='utf-8')
-    return str(p)
-
-def _compact_trade_row(trade: Dict[str, Any]) -> Dict[str, Any]:
-    keep = [
-        'trade_id',
-        'trade_date_et',
-        'time_tw',
-        'ticker',
-        'side',
-        'shares',
-        'cash_amount',
-        'price',
-        'gross',
-        'fee',
-        'notes',
-        'source',
-    ]
-    out: Dict[str, Any] = {}
-    for k in keep:
-        if k in trade:
-            v = trade.get(k)
-            if v is None:
-                continue
-            if isinstance(v, str) and not v.strip():
-                continue
-            out[k] = v
-    return out
-
-def _round_selected_numeric_fields(obj: Any, keys: set, ndigits: int=4) -> None:
-    if isinstance(obj, dict):
-        for k, v in list(obj.items()):
-            if k in keys and isinstance(v, (int, float)) and not isinstance(v, bool):
-                obj[k] = round(float(v), ndigits)
-            else:
-                _round_selected_numeric_fields(v, keys, ndigits=ndigits)
-    elif isinstance(obj, list):
-        for item in obj:
-            _round_selected_numeric_fields(item, keys, ndigits=ndigits)
-_ET_TZ = 'America/New_York'
-_TW_TZ = 'Asia/Taipei'
-_OPEN_TIME_ET = time(9, 30)
-_DEFAULT_CLOSE_TIME_ET = time(16, 0)
-
-def _ensure_trading_calendar(runtime: Dict[str, Any]) -> Dict[str, Any]:
-    data = _runtime_data_config(runtime)
-    cal = data.setdefault('trading_calendar', {})
-    if not isinstance(cal, dict):
-        cal = {}
-        data['trading_calendar'] = cal
-    years = cal.get('years')
-    if not isinstance(years, dict):
-        cal['years'] = {}
-    return cal
-
-def _next_trading_day_et_from_states(runtime: Dict[str, Any], t_et: str) -> Optional[str]:
-    t_et = str(t_et or '').strip()
-    if not t_et:
-        return None
-    try:
-        cal = config_trading_calendar(_runtime_config(runtime))
-        years = cal.get('years') or {}
-        d = date.fromisoformat(_to_yyyy_mm_dd(t_et))
-        for _ in range(370):
-            d = d + timedelta(days=1)
-            if _is_weekend_et(d):
-                continue
-            y = f'{d.year:04d}'
-            year_block = years.get(y)
-            if not isinstance(year_block, dict):
-                break
-            closed = _closed_set_for_year_block(year_block)
-            ds = d.isoformat()
-            if ds in closed:
-                continue
-            return ds
-    except Exception:
-        pass
-    try:
-        import pandas as pd
-        import exchange_calendars as xc
-        cal = xc.get_calendar('XNYS')
-        ts = pd.Timestamp(_to_yyyy_mm_dd(t_et))
-        if not cal.is_session(ts):
-            ts = cal.previous_session(ts)
-        nxt = cal.next_session(ts)
-        return str(nxt.date())
-    except Exception:
-        pass
-    try:
-        d = date.fromisoformat(_to_yyyy_mm_dd(t_et))
-        for _ in range(10):
-            d = d + timedelta(days=1)
-            if _is_weekend_et(d):
-                continue
-            return d.isoformat()
-    except Exception:
-        return None
-    return None
-
-def _prev_trading_day_et_from_states(runtime: Dict[str, Any], t_et: str) -> Optional[str]:
-    t_et = str(t_et or '').strip()
-    if not t_et:
-        return None
-    try:
-        cal = config_trading_calendar(_runtime_config(runtime))
-        years = cal.get('years') or {}
-        d = date.fromisoformat(_to_yyyy_mm_dd(t_et))
-        for _ in range(370):
-            d = d - timedelta(days=1)
-            if _is_weekend_et(d):
-                continue
-            y = f'{d.year:04d}'
-            year_block = years.get(y)
-            if not isinstance(year_block, dict):
-                break
-            closed = _closed_set_for_year_block(year_block)
-            ds = d.isoformat()
-            if ds in closed:
-                continue
-            return ds
-    except Exception:
-        pass
-    try:
-        import pandas as pd
-        import exchange_calendars as xc
-        cal = xc.get_calendar('XNYS')
-        ts = pd.Timestamp(_to_yyyy_mm_dd(t_et))
-        if not cal.is_session(ts):
-            ts = cal.next_session(ts)
-        prev = cal.previous_session(ts)
-        return str(prev.date())
-    except Exception:
-        pass
-    try:
-        d = date.fromisoformat(_to_yyyy_mm_dd(t_et))
-        for _ in range(10):
-            d = d - timedelta(days=1)
-            if _is_weekend_et(d):
-                continue
-            return d.isoformat()
-    except Exception:
-        return None
-    return None
-
-def _is_full_day_closed_et(runtime: Dict[str, Any], d: date) -> bool:
-    if _is_weekend_et(d):
-        return True
-    try:
-        return bool(closed_reason(config_trading_calendar(_runtime_config(runtime)), d))
-    except Exception:
-        return False
-
-def _is_trading_day_et(runtime: Dict[str, Any], d: date) -> bool:
-    return not _is_full_day_closed_et(runtime, d)
-
-def _close_time_et_from_states(runtime: Dict[str, Any], d: date) -> time:
-    try:
-        payload = early_close_payload(config_trading_calendar(_runtime_config(runtime)), d)
-        raw = str(payload.get('close_time_et') or '').strip()
-        if raw:
-            parts = raw.split(':')
-            hh = int(parts[0])
-            mm = int(parts[1]) if len(parts) > 1 else 0
-            return time(hh, mm)
-    except Exception:
-        pass
-    return _DEFAULT_CLOSE_TIME_ET
-
-def _session_class_for_now_et(runtime: Dict[str, Any], now_et: datetime) -> str:
-    d = now_et.date()
-    if not _is_trading_day_et(runtime, d):
-        return 'closed'
-    open_dt = datetime.combine(d, _OPEN_TIME_ET, tzinfo=ZoneInfo(_ET_TZ))
-    close_dt = datetime.combine(d, _close_time_et_from_states(runtime, d), tzinfo=ZoneInfo(_ET_TZ))
-    if now_et < open_dt:
-        return 'premarket'
-    if now_et < close_dt:
-        return 'intraday'
-    return 'afterclose'
-
-def _resolve_report_context(states: Dict[str, Any], runtime: Dict[str, Any], mode_label: str, now_et: datetime) -> ReportContext:
-    mode_key = _normalize_mode_key(mode_label)
-    session = _session_class_for_now_et(runtime, now_et)
-    today = now_et.date()
-    now_iso = now_et.replace(microsecond=0).isoformat()
-    if mode_key == 'premarket':
-        if session == 'premarket':
-            t_et = _prev_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-            t1 = today.isoformat()
-            return ReportContext(mode_label, mode_key, session, now_iso, t_et, t1, t1, t_et, '', 'eod', True, 'today is a trading day before the open; premarket uses the latest completed trading day as t and today as t+1.', '')
-        if session == 'afterclose':
-            t_et = today.isoformat()
-            t1 = _next_trading_day_et_from_states(runtime, t_et) or t_et
-            return ReportContext(mode_label, mode_key, session, now_iso, t_et, t1, t1, t_et, '', 'eod', True, 'market has already closed; premarket can reasonably prepare the next trading day.', '')
-        if session == 'closed':
-            t1 = _next_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-            t_et = _prev_trading_day_et_from_states(runtime, t1) or t1
-            return ReportContext(mode_label, mode_key, session, now_iso, t_et, t1, t1, t_et, '', 'eod', True, 'today is not a trading day; premarket maps to the next trading day.', '')
-        t_et = _prev_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-        return ReportContext(mode_label, mode_key, session, now_iso, t_et, today.isoformat(), today.isoformat(), t_et, '', 'eod', False, 'premarket is defined before the regular session opens.', 'current ET session is intraday, so premarket semantics are no longer valid.')
-    if mode_key == 'intraday':
-        next_after_today = _next_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-        if session == 'intraday':
-            return ReportContext(mode_label, mode_key, session, now_iso, today.isoformat(), next_after_today, today.isoformat(), today.isoformat(), now_iso, 'intraday', True, 'market is open; intraday uses today as t and the next trading day as t+1.', '')
-        if session == 'premarket':
-            return ReportContext(mode_label, mode_key, session, now_iso, today.isoformat(), next_after_today, today.isoformat(), today.isoformat(), now_iso, 'intraday', False, 'intraday requires an active regular session.', 'current ET session is premarket; the regular session has not started yet.')
-        if session == 'afterclose':
-            return ReportContext(mode_label, mode_key, session, now_iso, today.isoformat(), next_after_today, today.isoformat(), today.isoformat(), now_iso, 'intraday', False, 'intraday requires an active regular session.', 'current ET session is afterclose; the regular session has already ended.')
-        t_et = _next_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-        t1 = _next_trading_day_et_from_states(runtime, t_et) or t_et
-        return ReportContext(mode_label, mode_key, session, now_iso, t_et, t1, t_et, t_et, now_iso, 'intraday', False, 'intraday requires an active trading day.', 'today is not a trading day, so intraday semantics are unavailable.')
-    if mode_key == 'afterclose':
-        if session == 'afterclose':
-            t_et = today.isoformat()
-            t1 = _next_trading_day_et_from_states(runtime, t_et) or t_et
-            return ReportContext(mode_label, mode_key, session, now_iso, t_et, t1, t_et, t_et, '', 'eod', True, 'market has closed; afterclose uses today as t and the next trading day as t+1.', '')
-        if session == 'premarket':
-            t_et = _prev_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-            return ReportContext(mode_label, mode_key, session, now_iso, t_et, today.isoformat(), t_et, t_et, '', 'eod', True, 'before the open, the latest completed trading day is the previous trading day, which is valid for afterclose.', '')
-        if session == 'closed':
-            t_et = _prev_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-            t1 = _next_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-            return ReportContext(mode_label, mode_key, session, now_iso, t_et, t1, t_et, t_et, '', 'eod', True, 'today is not a trading day; afterclose maps to the latest completed trading day.', '')
-        t1 = _next_trading_day_et_from_states(runtime, today.isoformat()) or today.isoformat()
-        return ReportContext(mode_label, mode_key, session, now_iso, today.isoformat(), t1, today.isoformat(), today.isoformat(), '', 'eod', False, 'afterclose requires a completed session close for t.', "current ET session is intraday, so today's close is not finalized yet.")
-    raise ValueError(f'unsupported mode: {mode_label}')
-
-def _report_meta_from_mode_dates(
-    mode_label: str,
-    t_et: str,
-    t_plus_1_et: Optional[str],
-    *,
-    generated_at_et: str = "",
-) -> Dict[str, Any]:
-    mode_key = _normalize_mode_key(mode_label)
-    version_anchor_et = _version_anchor_day_et(mode_label, t_et, t_plus_1_et)
-    meta = {
-        'mode': str(mode_label or '').strip(),
-        'mode_key': mode_key,
-        'signal_basis': {'t_et': t_et, 'basis': 'NYSE Intraday' if mode_key == 'intraday' else 'NYSE Close'},
-        'execution_basis': {'t_plus_1_et': t_plus_1_et, 'basis': 'NYSE Trading Day'},
-    }
-    if version_anchor_et:
-        meta['version_anchor_et'] = version_anchor_et
-    generated_at_value = str(generated_at_et or '').strip()
-    if generated_at_value:
-        meta['generated_at_et'] = generated_at_value
-    return meta
-
-def _report_meta_from_context(ctx: ReportContext) -> Dict[str, Any]:
-    return _report_meta_from_mode_dates(
-        ctx.mode_label,
-        ctx.t_et,
-        ctx.t_plus_1_et,
-        generated_at_et=ctx.now_et_iso,
-    )
-
-def _report_meta_from_report_date(
-    runtime: Dict[str, Any],
-    mode_label: str,
-    report_date: str,
-    *,
-    generated_at_et: str = "",
-) -> Dict[str, Any]:
-    anchor_et = _to_yyyy_mm_dd(report_date)
-    mode_key = _normalize_mode_key(mode_label)
-    if mode_key == 'premarket':
-        t_plus_1_et = anchor_et
-        t_et = _prev_trading_day_et_from_states(runtime, anchor_et) or anchor_et
-    else:
-        t_et = anchor_et
-        t_plus_1_et = _next_trading_day_et_from_states(runtime, anchor_et) or anchor_et
-    return _report_meta_from_mode_dates(
-        mode_label,
-        t_et,
-        t_plus_1_et,
-        generated_at_et=generated_at_et,
-    )
-
-def _resolve_runtime_report_meta(
-    runtime: Dict[str, Any],
-    mode_label: str,
-    report_date: str='',
-    now_et: Optional[datetime] = None,
-) -> Dict[str, Any]:
-    report_date = str(report_date or '').strip()
-    resolved_now_et = now_et.astimezone(ZoneInfo(_ET_TZ)) if isinstance(now_et, datetime) and now_et.tzinfo else now_et
-    if isinstance(resolved_now_et, datetime) and resolved_now_et.tzinfo is None:
-        resolved_now_et = resolved_now_et.replace(tzinfo=ZoneInfo(_ET_TZ))
-    if not isinstance(resolved_now_et, datetime):
-        resolved_now_et = datetime.now(ZoneInfo(_ET_TZ))
-    if report_date:
-        return _report_meta_from_report_date(
-            runtime,
-            mode_label,
-            report_date,
-            generated_at_et=resolved_now_et.replace(microsecond=0).isoformat(),
-        )
-    return _report_meta_from_context(_resolve_report_context({}, runtime, mode_label, resolved_now_et))
-
-def _report_date_from_meta(meta: Dict[str, Any]) -> str:
-    report_date = str(meta.get('version_anchor_et') or '').strip()
-    if report_date:
-        return report_date
-    execution_basis = meta.get('execution_basis') or {}
-    report_date = str(execution_basis.get('t_plus_1_et') or '').strip()
-    if report_date:
-        return report_date
-    signal_basis = meta.get('signal_basis') or {}
-    return str(signal_basis.get('t_et') or '').strip()
-
-def _strip_persisted_report_transients(states: Dict[str, Any]) -> None:
-    market = states.get('market')
-    if isinstance(market, dict):
-        market.pop('signals_inputs', None)
-        market.pop('next_close_threshold_inputs', None)
-    portfolio = states.get('portfolio')
-    if isinstance(portfolio, dict):
-        positions = portfolio.get('positions')
-        if isinstance(positions, list):
-            for pos in positions:
-                if isinstance(pos, dict):
-                    pos.pop('notes', None)
-    states.pop('signals', None)
-    states.pop('thresholds', None)
-    meta = states.get('meta')
-    if isinstance(meta, dict):
-        meta.pop('notes', None)
-        if not meta:
-            states.pop('meta', None)
-    states.pop('by_mode', None)
-
-
-def _compact_persistent_states(states: Dict[str, Any]) -> Dict[str, Any]:
-    compacted = copy.deepcopy(states if isinstance(states, dict) else {})
-    if not isinstance(compacted, dict):
-        return {'portfolio': {'positions': [], 'cash': {'usd': 0.0}}}
-
-    _strip_persisted_report_transients(compacted)
-    compacted.pop('_report_meta', None)
-    compacted.pop('config', None)
-    compacted.pop('market', None)
-
-    portfolio = compacted.setdefault('portfolio', {})
-    if not isinstance(portfolio, dict):
-        portfolio = {}
-        compacted['portfolio'] = portfolio
-
-    positions_src = portfolio.get('positions') or []
-    positions: List[Dict[str, Any]] = []
-    if isinstance(positions_src, list):
-        for pos in positions_src:
-            if not isinstance(pos, dict):
-                continue
-            ticker = str(pos.get('ticker') or '').upper().strip()
-            if not ticker:
-                continue
-            try:
-                shares = int(round(float(pos.get('shares') or 0.0)))
-            except Exception:
-                shares = 0
-            if shares <= 0:
-                continue
-            positions.append({'ticker': ticker, 'shares': shares})
-    portfolio['positions'] = positions
-
-    cash = portfolio.get('cash')
-    if not isinstance(cash, dict):
-        cash = {'usd': 0.0}
-        portfolio['cash'] = cash
-    try:
-        cash['usd'] = float(cash.get('usd') or 0.0)
-    except Exception:
-        cash['usd'] = 0.0
-
-    portfolio.pop('totals', None)
-
-    performance = portfolio.get('performance')
-    if isinstance(performance, dict):
-        for key in (
-            'current_total_assets_usd',
-            'net_external_cash_flow_usd',
-            'effective_capital_base_usd',
-            'profit_usd',
-            'profit_rate',
-            'returns',
-        ):
-            performance.pop(key, None)
-        if not performance:
-            portfolio.pop('performance', None)
-
-    return compacted
-
+from utils.trading_calendar import is_weekend_et as _is_weekend_et
 
 def _positions_need_trade_hydration(states: Dict[str, Any]) -> bool:
     positions = (((states.get('portfolio') or {}).get('positions')) or [])
@@ -588,133 +113,6 @@ def _hydrate_positions_from_trade_ledger_if_needed(states: Dict[str, Any], runti
     if not _positions_need_trade_hydration(states):
         return
     _rebuild_portfolio_positions_from_day1_fifo(states, runtime, trades)
-
-def _build_report_output(
-    states: Dict[str, Any],
-    schema_path: str,
-    report_dir: str,
-    report_out: str,
-    mode: str,
-    config: Optional[Dict[str, Any]] = None,
-    trades: Optional[List[Dict[str, Any]]] = None,
-    tactical_plan: Optional[Any] = None,
-    report_meta: Optional[Dict[str, Any]] = None,
-    market_history: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, str]:
-    report_root = build_report_root(
-        states,
-        config=config,
-        trades=trades,
-        tactical_plan=tactical_plan,
-        report_meta=report_meta,
-        market_history=market_history,
-    )
-    md, out_path = _render_report_output(
-        report_root,
-        schema_path=schema_path,
-        report_dir=report_dir,
-        report_out=report_out,
-        mode=mode,
-        report_meta=report_meta,
-    )
-    return (md, out_path)
-
-
-def _build_report_output_path(
-    report_dir: str,
-    report_out: str,
-    mode: str,
-    report_meta: Optional[Dict[str, Any]] = None,
-    states: Optional[Dict[str, Any]] = None,
-) -> str:
-    meta = dict(report_meta or {})
-    if not meta and isinstance(states, dict):
-        meta = _effective_report_meta(states, mode)
-    report_date = _report_date_from_meta(meta)
-    if not report_date:
-        report_date = datetime.now().strftime('%Y-%m-%d')
-    mode_key = _normalize_mode_key(mode) or 'report'
-    if str(report_out or '').strip():
-        return str(report_out).strip()
-    return str(Path(report_dir) / f'{report_date}_{mode_key}.md')
-
-
-def _build_report_json_output_path(
-    report_dir: str,
-    report_json_out: str,
-    mode: str,
-    report_meta: Optional[Dict[str, Any]] = None,
-    states: Optional[Dict[str, Any]] = None,
-) -> str:
-    meta = dict(report_meta or {})
-    if not meta and isinstance(states, dict):
-        meta = _effective_report_meta(states, mode)
-    report_date = _report_date_from_meta(meta)
-    if not report_date:
-        report_date = datetime.now().strftime('%Y-%m-%d')
-    mode_key = _normalize_mode_key(mode) or 'report'
-    if str(report_json_out or '').strip():
-        return str(report_json_out).strip()
-    return str(Path(report_dir) / f'{report_date}_{mode_key}.json')
-
-
-def _render_report_output(
-    report_root: Dict[str, Any],
-    *,
-    schema_path: str,
-    report_dir: str,
-    report_out: str,
-    mode: str,
-    report_meta: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, str]:
-    from core.reporting import load_schema as _load_report_schema, render_report as _render_report_markdown
-
-    schema = _load_report_schema(schema_path)
-    md = _render_report_markdown(report_root, schema, mode)
-    out_path = _build_report_output_path(
-        report_dir=report_dir,
-        report_out=report_out,
-        mode=mode,
-        report_meta=report_meta,
-        states=report_root,
-    )
-    return (md, out_path)
-
-def _version_anchor_day_et(mode: Any, t_et: str, t_plus_1_et: Optional[str]) -> Optional[str]:
-    m = _normalize_mode_key(mode)
-    if m == 'premarket':
-        return t_plus_1_et or t_et
-    if m in {'intraday', 'afterclose'}:
-        return t_et or t_plus_1_et
-    return t_plus_1_et or t_et
-
-def _parse_broker_asof(states: Dict[str, Any], broker_asof_et: str, broker_asof_et_time: str, broker_asof_et_datetime: str, mode: str='') -> Tuple[Optional[str], Optional[datetime], str]:
-    meta = states.get('meta', {}) or {}
-    broker_asof_et = str(broker_asof_et or '').strip()
-    broker_asof_et_time = str(broker_asof_et_time or '').strip()
-    broker_asof_et_datetime = str(broker_asof_et_datetime or '').strip()
-    if (broker_asof_et_time or broker_asof_et_datetime) and (not broker_asof_et):
-        raise ValueError('--broker-asof-et is required when --broker-asof-et-time or --broker-asof-et-datetime is provided.')
-    if not broker_asof_et:
-        portfolio = states.get('portfolio', {}) or {}
-        broker = portfolio.get('broker', {}) or {}
-        broker_asof_et = str(broker.get('asof_et') or '').strip()
-    if not broker_asof_et:
-        market = states.get('market', {}) or {}
-        broker_asof_et = str(market.get('asof_t_et') or '').strip()
-    if broker_asof_et:
-        broker_asof_et = _to_yyyy_mm_dd(broker_asof_et)
-    mode_key = _normalize_mode_key(mode)
-    if mode_key == 'intraday':
-        snapshot_kind = 'intraday'
-    elif mode_key in {'premarket', 'afterclose'}:
-        snapshot_kind = 'eod'
-    else:
-        snapshot_kind = 'unknown'
-    return (broker_asof_et or None, None, snapshot_kind)
-
-def _market_history_rows_map(runtime: Dict[str, Any]) -> Dict[str, Any]:
-    return _runtime_history(runtime)
 
 def _reprice_and_totals(states: Dict[str, Any], runtime: Dict[str, Any]) -> None:
     market = states.setdefault('market', {})
@@ -888,12 +286,13 @@ def _rebuild_market_snapshot_from_history(states: Dict[str, Any], runtime: Dict[
     market = states.setdefault('market', {})
     history = _runtime_history(runtime)
     keep_tickers = tickers if isinstance(tickers, list) and tickers else _discover_tickers_from_config(states, runtime)
-    new_prices_now: Dict[str, float] = {}
+    new_prices_now: Dict[str, Optional[float]] = {}
     imported_dates: List[str] = []
     for ticker in keep_tickers:
         ticker_norm = str(ticker or '').upper().strip()
         if not ticker_norm:
             continue
+        new_prices_now.setdefault(ticker_norm, None)
         rows = ((history.get(ticker_norm) or {}).get('rows') or [])
         if not rows:
             continue
@@ -1287,35 +686,6 @@ def _update_portfolio_performance(states: Dict[str, Any], usd_amount_ndigits: in
     returns['profit_usd'] = profit_usd
     returns['profit_rate'] = profit_rate
 
-def _normalize_trade_date_bounds(trade_date_from: str, trade_date_to: str) -> Tuple[str, str]:
-    start = _parse_ymd_loose(trade_date_from)
-    end = _parse_ymd_loose(trade_date_to)
-    if str(trade_date_from or '').strip() and start is None:
-        raise ValueError(f'invalid trade date from: {trade_date_from}')
-    if str(trade_date_to or '').strip() and end is None:
-        raise ValueError(f'invalid trade date to: {trade_date_to}')
-    if start is not None and end is not None and start > end:
-        raise ValueError(f'trade date from {start.isoformat()} is after trade date to {end.isoformat()}')
-    return start.isoformat() if start is not None else '', end.isoformat() if end is not None else ''
-
-def _trade_is_within_trade_date_bounds(trade: Dict[str, Any], trade_date_from: str, trade_date_to: str) -> bool:
-    trade_date_et = _normalize_trade_date_et(str(trade.get('trade_date_et') or ''))
-    return bool(trade_date_et) and not (trade_date_from and trade_date_et < trade_date_from) and not (trade_date_to and trade_date_et > trade_date_to)
-
-def _replace_trades(trades: List[Dict[str, Any]], trade_date_from: str='', trade_date_to: str='') -> Tuple[List[Dict[str, Any]], int]:
-    if not isinstance(trades, list) or not trades:
-        return (trades if isinstance(trades, list) else [], 0)
-    if not (trade_date_from or trade_date_to):
-        print(f'[REPLACE] removed {len(trades)} existing trade(s) from the full trade ledger.')
-        return ([], len(trades))
-    keep = [trade for trade in trades if not isinstance(trade, dict) or not _trade_is_within_trade_date_bounds(trade, trade_date_from, trade_date_to)]
-    removed = len(trades) - len(keep)
-    if removed:
-        start = trade_date_from or 'min'
-        end = trade_date_to or 'max'
-        print(f'[REPLACE] removed {removed} existing trade(s) in trade_date_et range {start}..{end}.')
-    return (keep if removed else trades, removed)
-
 def _sort_key_trade_for_portfolio(t: Dict[str, Any]) -> tuple:
     return (_normalize_trade_date_et(str(t.get('trade_date_et') or '')), _normalize_time_tw(str(t.get('time_tw') or '')), int(t.get('trade_id') or 0))
 
@@ -1636,11 +1006,11 @@ def _run_main(args: argparse.Namespace) -> int:
     if now_et_raw:
         now_et = datetime.fromisoformat(now_et_raw)
         if now_et.tzinfo is None:
-            now_et = now_et.replace(tzinfo=ZoneInfo(_ET_TZ))
+            now_et = now_et.replace(tzinfo=ZoneInfo(ET_TZ))
         else:
-            now_et = now_et.astimezone(ZoneInfo(_ET_TZ))
+            now_et = now_et.astimezone(ZoneInfo(ET_TZ))
     else:
-        now_et = datetime.now(ZoneInfo(_ET_TZ))
+        now_et = datetime.now(ZoneInfo(ET_TZ))
     resolved_ctx = None
     report_meta: Optional[Dict[str, Any]] = None
     force_mode = bool(getattr(args, 'force_mode', False))

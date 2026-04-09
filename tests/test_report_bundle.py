@@ -22,8 +22,8 @@ class ReportBundleTests(unittest.TestCase):
         plan = TacticalPlan(
             signals_inputs={"AAA": {"close_t": 10.0}},
             threshold_inputs={"AAA": {"close_t": 10.0}},
-            tactical_rows=[{"ticker": "AAA", "t_plus_1_action": "BUY"}],
-            threshold_rows=[{"ticker": "AAA", "threshold": 11.0}],
+            tactical_rows=[{"ticker": "AAA", "close_t": 10.0, "ma_t": 9.0, "close_t_minus_5": 8.0, "t_plus_1_action": "BUY"}],
+            threshold_rows=[{"ticker": "AAA", "threshold": 11.0, "threshold_from_ma": 11.0}],
         )
 
         report_root = build_report_root(
@@ -188,6 +188,43 @@ class ReportBundleTests(unittest.TestCase):
         self.assertEqual(
             price_notes,
             ["Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24."],
+        )
+
+    def test_build_report_root_filters_unrenderable_and_cash_pool_tactical_rows(self) -> None:
+        states = {
+            "market": {"prices_now": {}},
+            "portfolio": {"positions": [], "cash": {}, "totals": {}},
+        }
+        plan = TacticalPlan(
+            signals_inputs={"AAA": {"close_t": 10.0}, "META": {"close_t": 20.0}},
+            threshold_inputs={"AAA": {"threshold": 11.0}, "META": {"threshold": 21.0}},
+            tactical_rows=[
+                {"ticker": "AAA", "close_t": 10.0, "ma_t": 9.0, "close_t_minus_5": 8.0, "tactical_shares_pre": 0},
+                {"ticker": "META", "close_t": 20.0, "ma_t": 19.0, "close_t_minus_5": 18.0, "tactical_shares_pre": 0},
+                {"ticker": "QQQ", "close_t": None, "ma_t": None, "close_t_minus_5": None, "tactical_shares_pre": 0},
+            ],
+            threshold_rows=[
+                {"ticker": "AAA", "threshold": 11.0},
+                {"ticker": "META", "threshold": 21.0},
+                {"ticker": "QQQ", "threshold": None, "threshold_from_ma": None, "ma_sum_prev": None, "close_t_minus_5_next": None},
+            ],
+        )
+
+        report_root = build_report_root(
+            states,
+            config={
+                "portfolio": {"buckets": {"tactical": {"cash_pool_ticker": "META"}}},
+            },
+            tactical_plan=plan,
+        )
+
+        self.assertEqual(
+            [row["ticker"] for row in report_root["signals"]["tactical"]],
+            ["AAA"],
+        )
+        self.assertEqual(
+            [row["ticker"] for row in report_root["thresholds"]["buy_signal_close_price_thresholds"]],
+            ["AAA"],
         )
 
     def test_build_report_root_loads_trade_notes_for_all_current_positions(self) -> None:

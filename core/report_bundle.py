@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from core.models import TacticalPlan
 from core.report_meta import _normalize_mode_key
 from core.reconciliation import _trade_buy_total_cost_usd
-from utils.config_access import config_fx_pairs, config_tactical_indicators
+from utils.config_access import config_buckets, config_fx_pairs, config_tactical_indicators
 
 
 def _trade_note_sort_key(trade: Dict[str, Any]) -> tuple[str, str, int]:
@@ -89,6 +89,54 @@ def _usd_twd_fx_ticker(config: Optional[Dict[str, Any]]) -> str:
     if not isinstance(usd_twd_cfg, dict):
         return ""
     return str(usd_twd_cfg.get("ticker") or "").upper().strip()
+
+
+def _tactical_cash_pool_ticker(config: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(config, dict):
+        return ""
+    tactical_bucket = config_buckets(config).get("tactical") or {}
+    if not isinstance(tactical_bucket, dict):
+        return ""
+    return str(tactical_bucket.get("cash_pool_ticker") or "").upper().strip()
+
+
+def _row_has_any_value(row: Dict[str, Any], keys: tuple[str, ...]) -> bool:
+    for key in keys:
+        if row.get(key) is not None:
+            return True
+    return False
+
+
+def _filter_report_signal_rows(rows: List[Dict[str, Any]], config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cash_pool_ticker = _tactical_cash_pool_ticker(config)
+    filtered: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").upper().strip()
+        if cash_pool_ticker and ticker == cash_pool_ticker:
+            continue
+        try:
+            shares_pre = float(row.get("tactical_shares_pre") or 0.0)
+        except Exception:
+            shares_pre = 0.0
+        if shares_pre > 0 or _row_has_any_value(row, ("close_t", "ma_t", "close_t_minus_5")):
+            filtered.append(dict(row))
+    return filtered
+
+
+def _filter_report_threshold_rows(rows: List[Dict[str, Any]], config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cash_pool_ticker = _tactical_cash_pool_ticker(config)
+    filtered: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").upper().strip()
+        if cash_pool_ticker and ticker == cash_pool_ticker:
+            continue
+        if _row_has_any_value(row, ("ma_sum_prev", "close_t_minus_5_next", "threshold_from_ma", "threshold")):
+            filtered.append(dict(row))
+    return filtered
 def _signal_basis_day(report_meta: Optional[Dict[str, Any]]) -> str:
     if not isinstance(report_meta, dict):
         return ""
@@ -280,8 +328,8 @@ def build_report_root(
     if tactical_plan is not None:
         market["signals_inputs"] = dict(tactical_plan.signals_inputs)
         market["next_close_threshold_inputs"] = dict(tactical_plan.threshold_inputs)
-        signals["tactical"] = list(tactical_plan.tactical_rows)
-        thresholds["buy_signal_close_price_thresholds"] = list(tactical_plan.threshold_rows)
+        signals["tactical"] = _filter_report_signal_rows(list(tactical_plan.tactical_rows), config)
+        thresholds["buy_signal_close_price_thresholds"] = _filter_report_threshold_rows(list(tactical_plan.threshold_rows), config)
     if market:
         root["market"] = market
     if signals:

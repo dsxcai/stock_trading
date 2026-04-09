@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from utils.parsers import _normalize_time_tw, _normalize_trade_date_et
+from utils.dates import _normalize_time_tw, _normalize_trade_date_et
 
 
 def _first_token_ticker(product_name: str) -> str:
