@@ -190,7 +190,7 @@ class ReportBundleTests(unittest.TestCase):
             ["Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24."],
         )
 
-    def test_build_report_root_filters_unrenderable_and_cash_pool_tactical_rows(self) -> None:
+    def test_build_report_root_filters_unrenderable_rows_and_keeps_cash_pool_signal_row(self) -> None:
         states = {
             "market": {"prices_now": {}},
             "portfolio": {"positions": [], "cash": {}, "totals": {}},
@@ -220,7 +220,7 @@ class ReportBundleTests(unittest.TestCase):
 
         self.assertEqual(
             [row["ticker"] for row in report_root["signals"]["tactical"]],
-            ["AAA"],
+            ["AAA", "META"],
         )
         self.assertEqual(
             [row["ticker"] for row in report_root["thresholds"]["buy_signal_close_price_thresholds"]],

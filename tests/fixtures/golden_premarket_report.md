@@ -33,6 +33,7 @@ Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the c
 ## Signal Status
 | Ticker | A: Price (Now) | MA Rule | B: SMA(t) | C: Close(t-5) | A>B | A>C | Buy Signal | Tactical Shares (Pre-Execution) | t+1 Action | Action Shares |
 | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: |
+| META | 622.6600 | SMA50 | 653.0534 | 654.0700 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
 | MSFT | 399.4100 | SMA50 | 426.2154 | 405.7600 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |
 | GOOG | 309.4100 | SMA50 | 318.9058 | 306.9300 | FALSE | TRUE | FALSE | 0 | NO_ACTION | 0 |
 | AAPL | 254.2300 | SMA50 | 261.9912 | 260.8300 | FALSE | FALSE | FALSE | 0 | NO_ACTION | 0 |

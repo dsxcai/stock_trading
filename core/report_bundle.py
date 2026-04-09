@@ -108,13 +108,9 @@ def _row_has_any_value(row: Dict[str, Any], keys: tuple[str, ...]) -> bool:
 
 
 def _filter_report_signal_rows(rows: List[Dict[str, Any]], config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    cash_pool_ticker = _tactical_cash_pool_ticker(config)
     filtered: List[Dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
-            continue
-        ticker = str(row.get("ticker") or "").upper().strip()
-        if cash_pool_ticker and ticker == cash_pool_ticker:
             continue
         try:
             shares_pre = float(row.get("tactical_shares_pre") or 0.0)
