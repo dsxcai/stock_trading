@@ -7,6 +7,7 @@ The format is inspired by Keep a Changelog, and this project uses semantic versi
 ## [Unreleased]
 
 - GUI long-running operations now keep a stable in-page busy overlay and show estimated progress percentages instead of relying on a best-effort page-lock effect during synchronous form submission.
+- GUI now exposes a structured `Config` tab alongside `Report` and `Status`, covering all current live runtime config sections instead of limiting GUI config edits to tactical SMA indicators.
 
 ### Added
 - GUI cash-adjustment controls for recording external deposits and withdrawals through `update_states.py --cash-adjust-usd`, with optional notes and selected-report refresh.

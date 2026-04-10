@@ -17,7 +17,7 @@ from typing import Dict, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from gui.markdown import render_markdown
-from gui.services import GuiServices, OperationResult, SignalConfigSnapshot
+from gui.services import GuiServices, OperationResult, RuntimeConfigSnapshot, SignalConfigSnapshot
 
 _LOG_HIGHLIGHT_RE = re.compile(r"^\[(?:ERR|ERROR|EXCEPTION|ABORT)\]\s*|^Traceback\b|(?:^|\b)[A-Za-z_]*?(?:Error|Exception):", re.IGNORECASE)
 
@@ -47,7 +47,7 @@ class GuiApplication:
     def set_right_tab(self, right_tab: str) -> None:
         with self._lock:
             tab_value = str(right_tab or "").strip().lower()
-            self.state.right_tab = tab_value if tab_value in {"report", "status"} else "report"
+            self.state.right_tab = tab_value if tab_value in {"report", "status", "config"} else "report"
 
     def set_last_result(self, result: Optional[OperationResult]) -> None:
         with self._lock:
@@ -80,6 +80,7 @@ class GuiApplication:
         snapshot = self.snapshot()
         current_report_text = self.services.read_text(snapshot.selected_report_path) if snapshot.selected_report_path else ""
         current_report_html = render_markdown(current_report_text) if current_report_text else ""
+        runtime_config = self.services.load_runtime_config_snapshot()
         signal_config = self.services.load_signal_config()
         error_log_text = ""
         if snapshot.last_result and snapshot.last_result.log_path:
@@ -179,7 +180,7 @@ class GuiApplication:
     .ops-grid.two {{
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }}
-    button, select, input[type="date"], input[type="text"], input[type="file"] {{
+    button, select, textarea, input[type="date"], input[type="text"], input[type="file"], input[type="number"] {{
       width: 100%;
       border-radius: 12px;
       border: 1px solid var(--line);
@@ -187,6 +188,10 @@ class GuiApplication:
       font: inherit;
       background: white;
       color: var(--ink);
+    }}
+    textarea {{
+      min-height: 110px;
+      resize: vertical;
     }}
     button {{
       cursor: pointer;
@@ -451,6 +456,30 @@ class GuiApplication:
       color: var(--muted);
       font-size: 0.82rem;
     }}
+    .config-shell {{
+      display: grid;
+      gap: 18px;
+    }}
+    .config-section {{
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(248, 244, 235, 0.48), rgba(255, 255, 255, 0.94));
+    }}
+    .config-section-head {{
+      display: grid;
+      gap: 4px;
+    }}
+    .config-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }}
+    .config-span-2 {{
+      grid-column: 1 / -1;
+    }}
     .raw-report {{
       white-space: pre-wrap;
       word-break: break-word;
@@ -542,6 +571,12 @@ class GuiApplication:
       }}
       .viewer-body {{
         min-height: 50vh;
+      }}
+      .config-grid {{
+        grid-template-columns: 1fr;
+      }}
+      .config-span-2 {{
+        grid-column: auto;
       }}
     }}
   </style>
@@ -657,10 +692,6 @@ class GuiApplication:
         </form>
       </section>
       <section class="card stack">
-        <h2>Signal Config</h2>
-        {self._render_config_editor(signal_config)}
-      </section>
-      <section class="card stack">
         <h2>Recent Reports</h2>
         <div class="report-list">
           {self._render_recent_reports(recent_reports, snapshot.selected_report_path)}
@@ -680,12 +711,13 @@ class GuiApplication:
           <div class="tab-bar">
             <a class="toggle-link {'active' if snapshot.right_tab == 'report' else ''}" href="{self._build_home_href(snapshot, tab='report')}">Report</a>
             <a class="toggle-link {'active' if snapshot.right_tab == 'status' else ''}" href="{self._build_home_href(snapshot, tab='status')}">Status</a>
+            <a class="toggle-link {'active' if snapshot.right_tab == 'config' else ''}" href="{self._build_home_href(snapshot, tab='config')}">Config</a>
           </div>
           {self._render_view_toggle(snapshot)}
         </div>
       </div>
       <div class="viewer-body">
-        {self._render_right_panel(snapshot, current_report_text, current_report_html, error_log_text)}
+        {self._render_right_panel(snapshot, current_report_text, current_report_html, error_log_text, runtime_config, signal_config)}
       </div>
     </section>
   </main>
@@ -927,7 +959,7 @@ class GuiApplication:
             )
         return "\n".join(chunks)
 
-    def _render_config_editor(self, snapshot: SignalConfigSnapshot) -> str:
+    def _render_signal_config_editor(self, snapshot: SignalConfigSnapshot) -> str:
         rows = []
         for ticker in snapshot.candidate_tickers:
             current_window = int(snapshot.selected_windows.get(ticker, 50))
@@ -946,7 +978,7 @@ class GuiApplication:
                 "</tr>"
             )
         return (
-            '<form class="stack" method="post" action="/save-config" data-busy-message="Saving the config and refreshing the report, please wait..." data-async-submit="1" data-progress-kind="save-config">'
+            '<form class="stack" method="post" action="/save-signal-config" data-busy-message="Saving the signal config and refreshing the report, please wait..." data-async-submit="1" data-progress-kind="save-config">'
             '<table class="config-table">'
             '<thead><tr><th>Ticker</th><th>Enable</th><th>SMA</th></tr></thead>'
             f'<tbody>{"".join(rows)}</tbody>'
@@ -961,7 +993,7 @@ class GuiApplication:
             '<input id="allow_incomplete_config" type="checkbox" name="allow_incomplete_csv_rows" value="1">'
             '<label for="allow_incomplete_config" style="gap:0;">Allow incomplete CSV rows for report refresh</label>'
             '</div>'
-            '<div class="form-note">The GUI writes back to <code>config.json</code> by updating <code>state_engine.strategy.tactical.indicators</code>. Saving also regenerates the selected report when possible.</div>'
+            '<div class="form-note">This section writes back to <code>state_engine.strategy.tactical.indicators</code>. Saving also regenerates the selected report when possible.</div>'
             '<button type="submit">Save Signal Config</button>'
             '</form>'
         )
@@ -972,10 +1004,80 @@ class GuiApplication:
         report_text: str,
         report_html: str,
         error_log_text: str,
+        runtime_config: RuntimeConfigSnapshot,
+        signal_config: SignalConfigSnapshot,
     ) -> str:
         if snapshot.right_tab == "status":
             return self._render_status_panel(snapshot, error_log_text)
+        if snapshot.right_tab == "config":
+            return self._render_config_panel(runtime_config, signal_config)
         return self._render_report_view(snapshot, report_text, report_html)
+
+    def _render_config_panel(
+        self,
+        runtime_config: RuntimeConfigSnapshot,
+        signal_config: SignalConfigSnapshot,
+    ) -> str:
+        precision_fields = [
+            ("usd_amount", "USD Amount"),
+            ("display_price", "Display Price"),
+            ("display_pct", "Display Percent"),
+            ("trade_cash_amount", "Trade Cash Amount"),
+            ("trade_dedupe_amount", "Trade Dedupe Amount"),
+            ("state_selected_fields", "State Selected Fields"),
+            ("backtest_amount", "Backtest Amount"),
+            ("backtest_price", "Backtest Price"),
+            ("backtest_rate", "Backtest Rate"),
+            ("backtest_cost_param", "Backtest Cost Param"),
+        ]
+        precision_inputs = "".join(
+            f'<label>{html.escape(label)}'
+            f'<input type="number" min="0" name="{html.escape(key)}" value="{runtime_config.numeric_precision.get(key, 0)}">'
+            "</label>"
+            for key, label in precision_fields
+        )
+        fee_rate_value = format(runtime_config.fee_rate, "g")
+        return (
+            '<div class="config-shell">'
+            '<section class="config-section">'
+            '<div class="config-section-head">'
+            '<h3>Runtime Config</h3>'
+            '<div class="subtle">Edit every runtime option that the live state engine currently uses. These fields write back to <code>config.json</code> in canonical <code>state_engine</code> structure.</div>'
+            '</div>'
+            '<form class="stack" method="post" action="/save-runtime-config" data-busy-message="Saving the runtime config and refreshing the report, please wait..." data-async-submit="1" data-progress-kind="save-config">'
+            '<div class="config-grid">'
+            f'<label>Document Title / <code>meta.doc</code><input type="text" name="doc" value="{html.escape(runtime_config.doc)}"></label>'
+            f'<label>Fee Rate<input type="number" step="0.000001" name="fee_rate" value="{html.escape(fee_rate_value)}"></label>'
+            f'<label>Trades File<input type="text" name="trades_file" value="{html.escape(runtime_config.trades_file)}"></label>'
+            f'<label>Cash Events File<input type="text" name="cash_events_file" value="{html.escape(runtime_config.cash_events_file)}"></label>'
+            f'<label class="config-span-2">Core Bucket Tickers<textarea name="core_tickers" placeholder="SPY&#10;ARKQ">{html.escape(runtime_config.core_tickers_text)}</textarea><span class="form-note">One ticker per line, or use commas.</span></label>'
+            f'<label class="config-span-2">Tactical Bucket Tickers<textarea name="tactical_tickers" placeholder="QQQ&#10;SMH">{html.escape(runtime_config.tactical_tickers_text)}</textarea><span class="form-note">These tickers default into the <code>tactical</code> bucket.</span></label>'
+            f'<label>Tactical Cash Pool Ticker<input type="text" name="tactical_cash_pool_ticker" value="{html.escape(runtime_config.tactical_cash_pool_ticker)}" placeholder="META"></label>'
+            f'<label class="config-span-2">Tactical Cash Pool Bucket Tickers<textarea name="tactical_cash_pool_tickers" placeholder="META">{html.escape(runtime_config.tactical_cash_pool_tickers_text)}</textarea><span class="form-note">Optional extra tickers that should default into the <code>tactical_cash_pool</code> bucket.</span></label>'
+            f'<label class="config-span-2">FX Pairs<textarea name="fx_pairs" placeholder="usd_twd=TWD=X">{html.escape(runtime_config.fx_pairs_text)}</textarea><span class="form-note">One alias per line using <code>alias=ticker</code>.</span></label>'
+            f'<label class="config-span-2">CSV Sources<textarea name="csv_sources" placeholder="AAPL=AAPL.csv">{html.escape(runtime_config.csv_sources_text)}</textarea><span class="form-note">Optional overrides using <code>TICKER=relative/or/absolute/path.csv</code>.</span></label>'
+            f'<label class="config-span-2">Closed Trading Days<textarea name="closed_days" placeholder="2026-12-25=Christmas Day">{html.escape(runtime_config.closed_days_text)}</textarea><span class="form-note">One line per closure using <code>YYYY-MM-DD=Reason</code>.</span></label>'
+            f'<label class="config-span-2">Early Close Trading Days<textarea name="early_close_days" placeholder="2026-12-24=13:00|Christmas Eve">{html.escape(runtime_config.early_closes_text)}</textarea><span class="form-note">One line per event using <code>YYYY-MM-DD=HH:MM|Reason</code>.</span></label>'
+            f"{precision_inputs}"
+            f'<label>Previous Trade Days (Simplified)<input type="number" min="0" name="keep_prev_trade_days_simplified" value="{runtime_config.keep_prev_trade_days_simplified}"></label>'
+            '<div class="inline config-span-2">'
+            '<input id="allow_incomplete_runtime_config" type="checkbox" name="allow_incomplete_csv_rows" value="1">'
+            '<label for="allow_incomplete_runtime_config" style="gap:0;">Allow incomplete CSV rows for report refresh</label>'
+            '</div>'
+            '</div>'
+            '<div class="form-note">Saving preserves the current tactical indicator table below, then regenerates the selected report when possible.</div>'
+            '<button type="submit">Save Runtime Config</button>'
+            '</form>'
+            '</section>'
+            '<section class="config-section">'
+            '<div class="config-section-head">'
+            '<h3>Signal Config</h3>'
+            '<div class="subtle">Manage <code>state_engine.strategy.tactical.indicators</code> with the existing ticker/SMA editor.</div>'
+            '</div>'
+            f'{self._render_signal_config_editor(signal_config)}'
+            '</section>'
+            '</div>'
+        )
 
     def _render_status_panel(self, snapshot: GuiState, error_log_text: str) -> str:
         if snapshot.last_result is None:
@@ -1040,6 +1142,8 @@ class GuiApplication:
     def _viewer_title(snapshot: GuiState, selected_info: Optional[object]) -> str:
         if snapshot.right_tab == "status":
             return "Operation Status"
+        if snapshot.right_tab == "config":
+            return "Runtime Config"
         return selected_info.name if selected_info else "Report Viewer"
 
     @staticmethod
@@ -1048,6 +1152,8 @@ class GuiApplication:
             if snapshot.last_result is None:
                 return "No GUI operations have been run yet."
             return snapshot.last_result.message
+        if snapshot.right_tab == "config":
+            return "Edit config.json through structured forms instead of the command line."
         if selected_info:
             return snapshot.selected_report_path
         return "Select a recent report to render it here."
@@ -1175,7 +1281,17 @@ def make_handler(app: GuiApplication):
                         app.set_selected_report(result.report_path)
                     app.set_last_result(result)
                     return self._redirect_home()
-                if parsed.path == "/save-config":
+                if parsed.path == "/save-runtime-config":
+                    result = app.services.save_runtime_config(
+                        fields,
+                        selected_report_path=app.snapshot().selected_report_path,
+                        allow_incomplete_csv_rows=bool(fields.get("allow_incomplete_csv_rows")),
+                    )
+                    if result.success and result.report_path:
+                        app.set_selected_report(result.report_path)
+                    app.set_last_result(result)
+                    return self._redirect_home()
+                if parsed.path == "/save-signal-config":
                     snapshot = app.services.load_signal_config()
                     selected_windows = {}
                     for ticker in snapshot.candidate_tickers:

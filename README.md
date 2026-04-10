@@ -48,7 +48,7 @@ The main screen currently supports the following:
 - optionally limit Capital XLS imports to an ET trade-date range before `append` or `replace` is applied
 - record external cash deposits or withdrawals with a signed USD amount and optional note
 - regenerate the currently selected report automatically after imports, cash adjustments, or config changes when the target report can be identified
-- edit `state_engine.strategy.tactical.indicators` in `config.json`
+- edit all current live runtime settings in `config.json` through a structured `Config` tab, including buckets, FX pairs, trading calendar entries, numeric precision, render policy, and tactical indicators
 - select recent markdown reports and switch between rendered markdown and raw markdown
 - inspect the latest operation status and highlighted error output
 - restart or stop the local GUI server from the GUI itself
@@ -57,10 +57,10 @@ The main screen currently supports the following:
 
 The GUI is split into two areas:
 
-- left side: operational controls such as Daily Run, Generate Report, Import Trades, Cash Adjustment, Signal Config, and Recent Reports
-- right side: the main viewer, with `Report` and `Status` tabs
+- left side: operational controls such as Daily Run, Generate Report, Import Trades, Cash Adjustment, and Recent Reports
+- right side: the main viewer, with `Report`, `Status`, and `Config` tabs
 
-The `Report` tab renders the selected markdown report directly in the GUI. The `Status` tab shows the latest operation result, including the report path, log path, exit code, and captured log output. If an operation fails, error lines are highlighted in red.
+The `Report` tab renders the selected markdown report directly in the GUI. The `Status` tab shows the latest operation result, including the report path, log path, exit code, and captured log output. If an operation fails, error lines are highlighted in red. The `Config` tab exposes structured forms for the current runtime configuration instead of requiring direct JSON editing.
 
 ### 1.4 Current GUI limitations
 

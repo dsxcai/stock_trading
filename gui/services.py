@@ -10,7 +10,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import generate_report
 import update_states
@@ -29,6 +29,19 @@ _MODE_LABELS = {
     "intraday": "Intraday",
     "afterclose": "AfterClose",
 }
+_DEFAULT_NUMERIC_PRECISION = {
+    "usd_amount": 2,
+    "display_price": 2,
+    "display_pct": 2,
+    "trade_cash_amount": 4,
+    "trade_dedupe_amount": 6,
+    "state_selected_fields": 4,
+    "backtest_amount": 4,
+    "backtest_price": 4,
+    "backtest_rate": 6,
+    "backtest_cost_param": 6,
+}
+_DEFAULT_KEEP_PREV_TRADE_DAYS_SIMPLIFIED = 5
 
 
 @dataclass(frozen=True)
@@ -60,6 +73,104 @@ class SignalConfigSnapshot:
     candidate_tickers: List[str]
 
 
+@dataclass(frozen=True)
+class RuntimeConfigSnapshot:
+    doc: str
+    trades_file: str
+    cash_events_file: str
+    fee_rate: float
+    core_tickers_text: str
+    tactical_tickers_text: str
+    tactical_cash_pool_ticker: str
+    tactical_cash_pool_tickers_text: str
+    fx_pairs_text: str
+    csv_sources_text: str
+    closed_days_text: str
+    early_closes_text: str
+    numeric_precision: Dict[str, int]
+    keep_prev_trade_days_simplified: int
+
+
+def _dedupe_preserve_order(values: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            out.append(normalized)
+    return out
+
+
+def _parse_ticker_list(raw_value: str) -> List[str]:
+    parts = re.split(r"[\s,]+", str(raw_value or "").strip())
+    tickers = [str(part or "").upper().strip() for part in parts if str(part or "").strip()]
+    return _dedupe_preserve_order(tickers)
+
+
+def _format_lines(lines: List[str]) -> str:
+    return "\n".join(str(line or "").strip() for line in lines if str(line or "").strip())
+
+
+def _parse_key_value_lines(raw_value: str, *, value_name: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for line_no, raw_line in enumerate(str(raw_value or "").splitlines(), start=1):
+        line = str(raw_line or "").strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise ValueError(f"line {line_no} must use key=value format for {value_name}")
+        key, value = line.split("=", 1)
+        key_norm = str(key or "").strip()
+        value_norm = str(value or "").strip()
+        if not key_norm:
+            raise ValueError(f"line {line_no} is missing the key for {value_name}")
+        if not value_norm:
+            raise ValueError(f"line {line_no} is missing the value for {value_name}")
+        out[key_norm] = value_norm
+    return out
+
+
+def _parse_closed_days(raw_value: str) -> Dict[str, str]:
+    return _parse_key_value_lines(raw_value, value_name="closed days")
+
+
+def _parse_early_close_days(raw_value: str) -> Dict[str, Dict[str, str]]:
+    out: Dict[str, Dict[str, str]] = {}
+    for line_no, raw_line in enumerate(str(raw_value or "").splitlines(), start=1):
+        line = str(raw_line or "").strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise ValueError(f"line {line_no} must use YYYY-MM-DD=HH:MM|Reason for early closes")
+        day_text, payload = line.split("=", 1)
+        day_key = str(day_text or "").strip()
+        payload_text = str(payload or "").strip()
+        if not day_key:
+            raise ValueError(f"line {line_no} is missing the date for early closes")
+        if not payload_text:
+            raise ValueError(f"line {line_no} is missing the early close payload")
+        time_text, sep, reason_text = payload_text.partition("|")
+        close_time_et = str(time_text or "").strip()
+        reason = str(reason_text or "").strip()
+        if not re.fullmatch(r"\d{2}:\d{2}", close_time_et):
+            raise ValueError(f"line {line_no} must use HH:MM for early close times")
+        out[day_key] = {"close_time_et": close_time_et}
+        if sep and reason:
+            out[day_key]["reason"] = reason
+    return out
+
+
+def _normalize_numeric_precision_value(raw_value: Any, *, key: str) -> int:
+    try:
+        parsed = int(raw_value)
+    except Exception as exc:
+        raise ValueError(f"{key} must be a non-negative integer") from exc
+    if parsed < 0:
+        raise ValueError(f"{key} must be a non-negative integer")
+    return parsed
+
+
 class GuiServices:
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = Path(repo_root).resolve()
@@ -88,17 +199,24 @@ class GuiServices:
     def schema_path(self) -> Path:
         return self.repo_root / "report_spec.json"
 
-    @staticmethod
-    def _generate_report_command(mode_key: str, *extra_args: str) -> List[str]:
+    def _runtime_ledger_args(self) -> List[str]:
+        snapshot = self.load_runtime_config_snapshot()
+        return [
+            "--config",
+            "config.json",
+            "--trades-file",
+            snapshot.trades_file,
+            "--cash-events-file",
+            snapshot.cash_events_file,
+        ]
+
+    def _generate_report_command(self, mode_key: str, *extra_args: str) -> List[str]:
         return [
             sys.executable,
             "generate_report.py",
             "--states",
             "states.json",
-            "--config",
-            "config.json",
-            "--trades-file",
-            "trades.json",
+            *self._runtime_ledger_args(),
             "--schema",
             "report_spec.json",
             "--mode",
@@ -240,6 +358,210 @@ class GuiServices:
         ordered = list(selected_windows.keys()) + sorted([ticker for ticker in candidates if ticker not in selected_windows])
         return SignalConfigSnapshot(selected_windows=selected_windows, candidate_tickers=ordered)
 
+    def load_runtime_config_snapshot(self) -> RuntimeConfigSnapshot:
+        config = load_state_engine_config(str(self.config_path))
+        meta = config.get("meta") if isinstance(config.get("meta"), dict) else {}
+        execution = config.get("execution") if isinstance(config.get("execution"), dict) else {}
+        portfolio = config.get("portfolio") if isinstance(config.get("portfolio"), dict) else {}
+        buckets = portfolio.get("buckets") if isinstance(portfolio.get("buckets"), dict) else {}
+        core_bucket = buckets.get("core") if isinstance(buckets.get("core"), dict) else {}
+        tactical_bucket = buckets.get("tactical") if isinstance(buckets.get("tactical"), dict) else {}
+        tactical_cash_pool_bucket = (
+            buckets.get("tactical_cash_pool") if isinstance(buckets.get("tactical_cash_pool"), dict) else {}
+        )
+        data = config.get("data") if isinstance(config.get("data"), dict) else {}
+        reporting = config.get("reporting") if isinstance(config.get("reporting"), dict) else {}
+        numeric_precision = reporting.get("numeric_precision") if isinstance(reporting.get("numeric_precision"), dict) else {}
+        trade_render_policy = (
+            reporting.get("trade_render_policy") if isinstance(reporting.get("trade_render_policy"), dict) else {}
+        )
+        fx_pairs = data.get("fx_pairs") if isinstance(data.get("fx_pairs"), dict) else {}
+        csv_sources = data.get("csv_sources") if isinstance(data.get("csv_sources"), dict) else {}
+        trading_calendar = data.get("trading_calendar") if isinstance(data.get("trading_calendar"), dict) else {}
+        years = trading_calendar.get("years") if isinstance(trading_calendar.get("years"), dict) else {}
+
+        closed_days: List[str] = []
+        early_closes: List[str] = []
+        for year_key in sorted(years.keys()):
+            year_payload = years.get(year_key) if isinstance(years.get(year_key), dict) else {}
+            closed = year_payload.get("closed") if isinstance(year_payload.get("closed"), dict) else {}
+            early_close = year_payload.get("early_close") if isinstance(year_payload.get("early_close"), dict) else {}
+            for day_key in sorted(closed.keys()):
+                reason = str(closed.get(day_key) or "").strip()
+                if reason:
+                    closed_days.append(f"{day_key}={reason}")
+            for day_key in sorted(early_close.keys()):
+                payload = early_close.get(day_key) if isinstance(early_close.get(day_key), dict) else {}
+                close_time_et = str(payload.get("close_time_et") or "").strip()
+                reason = str(payload.get("reason") or "").strip()
+                if close_time_et:
+                    early_closes.append(f"{day_key}={close_time_et}|{reason}" if reason else f"{day_key}={close_time_et}")
+
+        normalized_precision = {
+            key: _normalize_numeric_precision_value(numeric_precision.get(key, default_value), key=key)
+            for key, default_value in _DEFAULT_NUMERIC_PRECISION.items()
+        }
+        return RuntimeConfigSnapshot(
+            doc=str(meta.get("doc") or "").strip(),
+            trades_file=str(meta.get("trades_file") or "trades.json").strip() or "trades.json",
+            cash_events_file=str(meta.get("cash_events_file") or "cash_events.json").strip() or "cash_events.json",
+            fee_rate=float(execution.get("fee_rate") or 0.0),
+            core_tickers_text=_format_lines([str(value or "").upper().strip() for value in core_bucket.get("tickers") or []]),
+            tactical_tickers_text=_format_lines(
+                [str(value or "").upper().strip() for value in tactical_bucket.get("tickers") or []]
+            ),
+            tactical_cash_pool_ticker=str(tactical_bucket.get("cash_pool_ticker") or "").upper().strip(),
+            tactical_cash_pool_tickers_text=_format_lines(
+                [str(value or "").upper().strip() for value in tactical_cash_pool_bucket.get("tickers") or []]
+            ),
+            fx_pairs_text=_format_lines(
+                [
+                    f"{alias}={str((payload or {}).get('ticker') or '').strip()}"
+                    for alias, payload in sorted(fx_pairs.items())
+                    if isinstance(payload, dict) and str((payload or {}).get("ticker") or "").strip()
+                ]
+            ),
+            csv_sources_text=_format_lines(
+                [
+                    f"{str(ticker or '').upper().strip()}={str(path or '').strip()}"
+                    for ticker, path in sorted(csv_sources.items())
+                    if str(ticker or "").strip() and str(path or "").strip()
+                ]
+            ),
+            closed_days_text=_format_lines(closed_days),
+            early_closes_text=_format_lines(early_closes),
+            numeric_precision=normalized_precision,
+            keep_prev_trade_days_simplified=_normalize_numeric_precision_value(
+                trade_render_policy.get(
+                    "keep_prev_trade_days_simplified",
+                    _DEFAULT_KEEP_PREV_TRADE_DAYS_SIMPLIFIED,
+                ),
+                key="keep_prev_trade_days_simplified",
+            ),
+        )
+
+    def save_runtime_config(
+        self,
+        config_fields: Dict[str, Any],
+        *,
+        selected_report_path: str = "",
+        allow_incomplete_csv_rows: bool = False,
+    ) -> OperationResult:
+        raw = load_json_object(str(self.config_path))
+        state_engine = raw.get("state_engine") if isinstance(raw.get("state_engine"), dict) else {}
+        strategy = state_engine.get("strategy") if isinstance(state_engine.get("strategy"), dict) else {}
+        tactical = strategy.get("tactical") if isinstance(strategy.get("tactical"), dict) else {}
+        indicators = tactical.get("indicators") if isinstance(tactical.get("indicators"), dict) else {}
+
+        doc = str(config_fields.get("doc") or "").strip()
+        trades_file = str(config_fields.get("trades_file") or "trades.json").strip() or "trades.json"
+        cash_events_file = str(config_fields.get("cash_events_file") or "cash_events.json").strip() or "cash_events.json"
+        fee_rate_raw = str(config_fields.get("fee_rate") or "").strip()
+        try:
+            fee_rate = float(fee_rate_raw or 0.0)
+        except Exception as exc:
+            raise ValueError("fee_rate must be a number") from exc
+        core_tickers = _parse_ticker_list(str(config_fields.get("core_tickers") or ""))
+        tactical_tickers = _parse_ticker_list(str(config_fields.get("tactical_tickers") or ""))
+        tactical_cash_pool_ticker = str(config_fields.get("tactical_cash_pool_ticker") or "").upper().strip()
+        tactical_cash_pool_tickers = _parse_ticker_list(str(config_fields.get("tactical_cash_pool_tickers") or ""))
+        fx_pairs_raw = _parse_key_value_lines(str(config_fields.get("fx_pairs") or ""), value_name="FX pairs")
+        fx_pairs = {alias: {"ticker": ticker.upper()} for alias, ticker in fx_pairs_raw.items()}
+        csv_sources_raw = _parse_key_value_lines(str(config_fields.get("csv_sources") or ""), value_name="CSV sources")
+        csv_sources = {str(ticker or "").upper().strip(): str(path or "").strip() for ticker, path in csv_sources_raw.items()}
+        closed_days = _parse_closed_days(str(config_fields.get("closed_days") or ""))
+        early_close_days = _parse_early_close_days(str(config_fields.get("early_close_days") or ""))
+
+        numeric_precision: Dict[str, int] = {}
+        for key, default_value in _DEFAULT_NUMERIC_PRECISION.items():
+            numeric_precision[key] = _normalize_numeric_precision_value(
+                str(config_fields.get(key) or default_value).strip() or default_value,
+                key=key,
+            )
+        keep_prev_trade_days_simplified = _normalize_numeric_precision_value(
+            str(
+                config_fields.get(
+                    "keep_prev_trade_days_simplified",
+                    _DEFAULT_KEEP_PREV_TRADE_DAYS_SIMPLIFIED,
+                )
+                or _DEFAULT_KEEP_PREV_TRADE_DAYS_SIMPLIFIED
+            ).strip()
+            or _DEFAULT_KEEP_PREV_TRADE_DAYS_SIMPLIFIED,
+            key="keep_prev_trade_days_simplified",
+        )
+
+        calendar_years: Dict[str, Dict[str, Any]] = {}
+        for day_key, reason in sorted(closed_days.items()):
+            year_payload = calendar_years.setdefault(day_key[:4], {})
+            year_payload.setdefault("closed", {})[day_key] = reason
+        for day_key, payload in sorted(early_close_days.items()):
+            year_payload = calendar_years.setdefault(day_key[:4], {})
+            year_payload.setdefault("early_close", {})[day_key] = dict(payload)
+
+        canonical_state_engine: Dict[str, Any] = {
+            "meta": {
+                "doc": doc,
+                "trades_file": trades_file,
+                "cash_events_file": cash_events_file,
+            },
+            "execution": {
+                "fee_rate": fee_rate,
+            },
+            "portfolio": {
+                "buckets": {
+                    "core": {"tickers": core_tickers},
+                    "tactical": {
+                        "tickers": tactical_tickers,
+                        "cash_pool_ticker": tactical_cash_pool_ticker,
+                    },
+                    "tactical_cash_pool": {"tickers": tactical_cash_pool_tickers},
+                }
+            },
+            "strategy": {
+                "tactical": {
+                    "indicators": indicators,
+                }
+            },
+            "data": {
+                "fx_pairs": fx_pairs,
+                "csv_sources": csv_sources,
+                "trading_calendar": {"years": calendar_years},
+            },
+            "reporting": {
+                "numeric_precision": numeric_precision,
+                "trade_render_policy": {
+                    "keep_prev_trade_days_simplified": keep_prev_trade_days_simplified,
+                },
+            },
+        }
+        self.config_path.write_text(
+            json.dumps({"state_engine": canonical_state_engine}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        result = OperationResult(
+            name="Save runtime config",
+            success=True,
+            returncode=0,
+            command="config.json update",
+            stdout="",
+            message="Saved runtime config to config.json.",
+        )
+        refreshed = self.refresh_selected_report(
+            selected_report_path,
+            allow_incomplete_csv_rows=allow_incomplete_csv_rows,
+        )
+        if refreshed is None:
+            return result
+        if refreshed.success:
+            result.stdout = refreshed.stdout
+            result.log_path = refreshed.log_path
+            result.report_path = refreshed.report_path
+            result.report_json_path = refreshed.report_json_path
+            result.message += f" Refreshed {Path(refreshed.report_path).name}."
+            return result
+        refreshed.message = f"Config saved, but refreshing the selected report failed: {refreshed.message}"
+        return refreshed
+
     def save_signal_config(
         self,
         selected_windows: Dict[str, int],
@@ -306,6 +628,7 @@ class GuiServices:
             "update_states.py",
             "--states",
             "states.json",
+            *self._runtime_ledger_args(),
             "--csv-dir",
             "data",
             "--derive-signals-inputs",
@@ -366,10 +689,7 @@ class GuiServices:
             "states.json",
             "--out",
             "states.json",
-            "--config",
-            "config.json",
-            "--trades-file",
-            "trades.json",
+            *self._runtime_ledger_args(),
             "--trades-import-mode",
             str(trades_import_mode or "replace"),
         ]
@@ -419,10 +739,7 @@ class GuiServices:
             "states.json",
             "--out",
             "states.json",
-            "--config",
-            "config.json",
-            "--trades-file",
-            "trades.json",
+            *self._runtime_ledger_args(),
             "--cash-adjust-usd",
             format(amount_value, "g"),
         ]
