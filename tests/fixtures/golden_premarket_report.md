@@ -17,6 +17,8 @@
 | Cumulative Profit | $-1,248.92 |
 | Cumulative Return | -3.81% |
 
+Note: Cumulative Profit = since-inception total PnL (realized + unrealized). Cumulative Return uses the same profit divided by Effective Capital Base, so deposits and withdrawals adjust the base but do not erase prior trading gains or losses.
+
 ## Current Positions
 | Bucket | Ticker | Shares | Cost (USD) | Price (Now) | Market Value (USD) | Unrealized PnL (USD) | Unrealized PnL (TWD) | Unrealized PnL % | Unrealized PnL % (TWD) | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |

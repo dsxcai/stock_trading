@@ -39,6 +39,7 @@ report/**
 data/**
 /states.json
 /trades.json
+/cash_events.json
 
 # SQLite / local databases
 *.sqlite3
