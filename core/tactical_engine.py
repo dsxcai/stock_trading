@@ -168,7 +168,7 @@ def compute_tactical_plan(
                 action = "HOLD"
                 action_shares = 0
             else:
-                action = "NO_ACTION"
+                action = "BUY"
                 action_shares = 0
         else:
             action = "NO_ACTION"

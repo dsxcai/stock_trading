@@ -57,43 +57,43 @@ Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the c
 
 ## Trade Details
 ### Trade Date (ET): 2026-03-20
-| Trade ID | Ticker | Side | Time (TW) | Price | Shares | Gross | Fee | Cash Amount | Cash Basis | Fee Rate | Notes |
-| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |
-| 103 | ARKQ | BUY | 2026/03/20 21:36:32 | 118.0000 | 2 | $236.00 | $0.47 | $236.47 | - | - | Imported from Capital XLS (ARKQ ARKQUS) |
-| 102 | SMH | BUY | 2026/03/20 21:34:37 | 393.9320 | 14 | $5,515.05 | $11.03 | $5,526.08 | - | - | Imported from Capital XLS (SMH VanEck半導體ETF) |
-| 101 | NVDA | SELL | 2026/03/20 21:31:18 | 177.2000 | 33 | $5,847.60 | $11.70 | $5,835.90 | - | - | Imported from Capital XLS (NVDA 輝達) |
-| Total | - | - | - | - | 49 | $11,598.65 | $23.20 | $11,598.45 | - | - | - |
+| Trade ID | Ticker | Side | Time (TW) | Price | Shares | Gross | Buy Fee | Sell Fee | Net Cash | Cash Basis | Fee Rate | Notes |
+| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |
+| 103 | ARKQ | BUY | 2026/03/20 21:36:32 | 118.0000 | 2 | $236.00 | $0.47 | - | $-236.47 | - | - | Imported from Capital XLS (ARKQ ARKQUS) |
+| 102 | SMH | BUY | 2026/03/20 21:34:37 | 393.9320 | 14 | $5,515.05 | $11.03 | - | $-5,526.08 | - | - | Imported from Capital XLS (SMH VanEck半導體ETF) |
+| 101 | NVDA | SELL | 2026/03/20 21:31:18 | 177.2000 | 33 | $5,847.60 | - | $11.70 | $5,835.90 | - | - | Imported from Capital XLS (NVDA 輝達) |
+| Total | - | - | - | - | 49 | $11,598.65 | $11.50 | $11.70 | $73.35 | - | - | - |
 
 ### Trade Date (ET): 2026-03-17
-| Trade ID | Ticker | Side | Time (TW) | Shares | Amount |
+| Trade ID | Ticker | Side | Time (TW) | Shares | Net Cash |
 | ---: | --- | --- | --- | ---: | ---: |
-| cash-00002 | CASH | WITHDRAWAL | - | - | $7,007.51 |
-| Total | - | - | - | - | $7,007.51 |
+| cash-00002 | CASH | WITHDRAWAL | - | - | $-7,007.51 |
+| Total | - | - | - | - | $-7,007.51 |
 
 ### Trade Date (ET): 2026-03-16
-| Trade ID | Ticker | Side | Time (TW) | Shares | Amount |
+| Trade ID | Ticker | Side | Time (TW) | Shares | Net Cash |
 | ---: | --- | --- | --- | ---: | ---: |
-| 100 | NVDA | BUY | 2026/03/16 23:15:59 | 33 | $6,102.30 |
-| 99 | SMH | BUY | 2026/03/16 23:15:33 | 15 | $5,968.56 |
-| Total | - | - | - | 48 | $12,070.86 |
+| 100 | NVDA | BUY | 2026/03/16 23:15:59 | 33 | $-6,102.30 |
+| 99 | SMH | BUY | 2026/03/16 23:15:33 | 15 | $-5,968.56 |
+| Total | - | - | - | 48 | $-12,070.86 |
 
 ### Trade Date (ET): 2026-03-13
-| Trade ID | Ticker | Side | Time (TW) | Shares | Amount |
+| Trade ID | Ticker | Side | Time (TW) | Shares | Net Cash |
 | ---: | --- | --- | --- | ---: | ---: |
 | 98 | NVDA | SELL | 2026/03/14 00:07:02 | 54 | $9,772.78 |
 | 97 | SMH | SELL | 2026/03/14 00:06:37 | 24 | $9,305.59 |
 | Total | - | - | - | 78 | $19,078.37 |
 
 ### Trade Date (ET): 2026-03-12
-| Trade ID | Ticker | Side | Time (TW) | Shares | Amount |
+| Trade ID | Ticker | Side | Time (TW) | Shares | Net Cash |
 | ---: | --- | --- | --- | ---: | ---: |
-| cash-00001 | CASH | WITHDRAWAL | - | - | $717.95 |
-| Total | - | - | - | - | $717.95 |
+| cash-00001 | CASH | WITHDRAWAL | - | - | $-717.95 |
+| Total | - | - | - | - | $-717.95 |
 
 ### Trade Date (ET): 2026-03-10
-| Trade ID | Ticker | Side | Time (TW) | Shares | Amount |
+| Trade ID | Ticker | Side | Time (TW) | Shares | Net Cash |
 | ---: | --- | --- | --- | ---: | ---: |
-| 96 | SMH | BUY | 2026/03/10 22:59:57 | 24 | $9,659.36 |
-| 95 | NVDA | BUY | 2026/03/10 22:58:45 | 54 | $10,040.77 |
+| 96 | SMH | BUY | 2026/03/10 22:59:57 | 24 | $-9,659.36 |
+| 95 | NVDA | BUY | 2026/03/10 22:58:45 | 54 | $-10,040.77 |
 | 94 | META | SELL | 2026/03/10 22:54:37 | 31 | $20,388.14 |
-| Total | - | - | - | 109 | $40,088.27 |
+| Total | - | - | - | 109 | $688.01 |

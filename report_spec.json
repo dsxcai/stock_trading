@@ -342,8 +342,9 @@
           { "header": "Price", "value": { "path": "price" }, "format": "p4", "align": "right" },
           { "header": "Shares", "value": { "path": "shares" }, "format": "int", "align": "right" },
           { "header": "Gross", "value": { "path": "gross" }, "format": "usd2", "align": "right" },
-          { "header": "Fee", "value": { "path": "fee" }, "format": "usd2", "align": "right" },
-          { "header": "Cash Amount", "value": { "path": "cash_amount" }, "format": "usd2", "align": "right" },
+          { "header": "Buy Fee", "value": { "path": "buy_fee" }, "format": "usd2", "align": "right" },
+          { "header": "Sell Fee", "value": { "path": "sell_fee" }, "format": "usd2", "align": "right" },
+          { "header": "Net Cash", "value": { "path": "cash_effect" }, "format": "usd2", "align": "right" },
           { "header": "Cash Basis", "value": { "path": "cash_basis" } },
           { "header": "Fee Rate", "value": { "path": "fee_rate_pct" }, "format": "pct2", "align": "right" },
           { "header": "Notes", "value": { "path": "notes" } }
@@ -354,7 +355,7 @@
           { "header": "Side", "value": { "path": "side" } },
           { "header": "Time (TW)", "value": { "path": "time_tw" }, "format": "datetime" },
           { "header": "Shares", "value": { "path": "shares" }, "format": "int", "align": "right" },
-          { "header": "Amount", "value": { "path": "cash_amount" }, "format": "usd2", "align": "right" }
+          { "header": "Net Cash", "value": { "path": "cash_effect" }, "format": "usd2", "align": "right" }
         ]
       },
       "group_footer_rows": {
@@ -364,8 +365,9 @@
             "cells": {
               "Shares": { "path": "totals.shares", "format": "int" },
               "Gross": { "path": "totals.gross", "format": "usd2" },
-              "Fee": { "path": "totals.fee", "format": "usd2" },
-              "Cash Amount": { "path": "totals.cash_amount", "format": "usd2" }
+              "Buy Fee": { "path": "totals.buy_fee", "format": "usd2" },
+              "Sell Fee": { "path": "totals.sell_fee", "format": "usd2" },
+              "Net Cash": { "path": "totals.cash_effect", "format": "usd2" }
             }
           }
         ],
@@ -374,7 +376,7 @@
             "label": "Total",
             "cells": {
               "Shares": { "path": "totals.shares", "format": "int" },
-              "Amount": { "path": "totals.cash_amount", "format": "usd2" }
+              "Net Cash": { "path": "totals.cash_effect", "format": "usd2" }
             }
           }
         ]

@@ -171,6 +171,32 @@ class StateEngineSignalTests(unittest.TestCase):
         self.assertEqual(int(row.get("action_shares") or 0), 19)
         self.assertEqual(float(row.get("action_cash_amount_usd") or 0.0), 951.9)
 
+    def test_buy_signal_without_budget_still_renders_buy_zero(self) -> None:
+        states = {
+            "config": _signal_config({"AAA": "SMA50"}, fee_rate=0.002),
+            "market": {
+                "asof_t_et": "2026-03-17",
+                "prices_now": {"AAA": 50.0},
+                "signals_inputs": {
+                    "AAA": {"close_t": 120.0, "ma_t": 100.0, "close_t_minus_5": 110.0}
+                },
+                "next_close_threshold_inputs": {},
+            },
+            "portfolio": {
+                "positions": [],
+                "cash": {"usd": 0.0, "deployable_usd": 0.0, "reserve_usd": 0.0},
+            },
+            "trades": [],
+        }
+        self._run_signal_update(states)
+
+        row = (states.get("signals", {}).get("tactical") or [])[0]
+        self.assertTrue(bool(row.get("buy_signal")))
+        self.assertEqual(float(row.get("investable_cash_usd") or 0.0), 0.0)
+        self.assertEqual(row.get("t_plus_1_action"), "BUY")
+        self.assertEqual(int(row.get("action_shares") or 0), 0)
+        self.assertEqual(float(row.get("action_cash_amount_usd") or 0.0), 0.0)
+
     def test_recent_buy_timing_does_not_turn_failed_buy_into_buy(self) -> None:
         states = {
             "config": _signal_config({"SMH": "SMA100"}),

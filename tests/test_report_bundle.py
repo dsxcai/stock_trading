@@ -29,7 +29,7 @@ class ReportBundleTests(unittest.TestCase):
         report_root = build_report_root(
             states,
             config={"meta": {"doc": "x", "trades_file": "trades.json", "cash_events_file": "cash_events.json"}},
-            trades=[{"trade_id": 1, "ticker": "AAA"}],
+            trades=[{"trade_id": 1, "ticker": "AAA", "side": "BUY", "cash_amount": 100.0, "fee": 1.0}],
             cash_events=[{"event_id": "cash-00001", "event_date_et": "2026-03-18", "kind": "deposit", "amount_usd": 500.0, "cash_effect_usd": 500.0}],
             tactical_plan=plan,
         )
@@ -39,6 +39,8 @@ class ReportBundleTests(unittest.TestCase):
         self.assertEqual(report_root["trades"][0]["ticker"], "AAA")
         self.assertEqual(report_root["cash_events"][0]["event_id"], "cash-00001")
         self.assertEqual([row["trade_id"] for row in report_root["activities"]], [1, "cash-00001"])
+        self.assertEqual(report_root["activities"][0]["cash_effect"], -100.0)
+        self.assertIsNone(report_root["activities"][0]["sell_fee"])
         self.assertEqual(report_root["signals"]["tactical"][0]["t_plus_1_action"], "BUY")
         self.assertEqual(report_root["thresholds"]["buy_signal_close_price_thresholds"][0]["threshold"], 11.0)
         self.assertEqual(report_root["market"]["signals_inputs"]["AAA"]["close_t"], 10.0)
@@ -76,6 +78,9 @@ class ReportBundleTests(unittest.TestCase):
                 ("cash-00003", "CASH", "WITHDRAWAL"),
             ],
         )
+        self.assertEqual(report_root["activities"][0]["cash_effect"], -100.0)
+        self.assertEqual(report_root["activities"][1]["cash_effect"], 500.0)
+        self.assertEqual(report_root["activities"][2]["cash_effect"], -300.0)
         self.assertEqual(report_root["portfolio"]["positions"][0]["notes"], "open lot x1")
 
     def test_build_report_root_derives_position_notes_from_trades(self) -> None:

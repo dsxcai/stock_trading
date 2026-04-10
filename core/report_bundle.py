@@ -145,6 +145,60 @@ def _cash_event_sort_key(event: Dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def _float_or_none(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _trade_fee_split(side: str, fee_value: Optional[float]) -> tuple[Optional[float], Optional[float]]:
+    side_norm = str(side or "").upper().strip()
+    if fee_value is None:
+        return None, None
+    if side_norm.startswith("B"):
+        return fee_value, None
+    if side_norm.startswith("S"):
+        return None, fee_value
+    return None, None
+
+
+def _trade_cash_effect(row: Dict[str, Any]) -> Optional[float]:
+    side = str(row.get("side") or "").upper().strip()
+    cash_amount = _float_or_none(row.get("cash_amount"))
+    if side.startswith("B"):
+        if cash_amount is not None:
+            return -abs(cash_amount)
+        gross = _float_or_none(row.get("gross"))
+        fee = _float_or_none(row.get("fee")) or 0.0
+        if gross is not None:
+            return -(gross + fee)
+        return None
+    if side.startswith("S"):
+        if cash_amount is not None:
+            return abs(cash_amount)
+        gross = _float_or_none(row.get("gross"))
+        fee = _float_or_none(row.get("fee")) or 0.0
+        if gross is not None:
+            return gross - fee
+        return None
+    return cash_amount
+
+
+def _trade_to_activity_row(trade: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(trade)
+    side = str(row.get("side") or "").upper().strip()
+    fee_value = _float_or_none(row.get("fee"))
+    buy_fee, sell_fee = _trade_fee_split(side, fee_value)
+    row.setdefault("activity_type", "trade")
+    row["buy_fee"] = buy_fee
+    row["sell_fee"] = sell_fee
+    row["cash_effect"] = _trade_cash_effect(row)
+    return row
+
+
 def _cash_event_to_activity_row(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     kind = str(event.get("kind") or "").strip().lower()
     if kind not in {"deposit", "withdrawal"}:
@@ -153,10 +207,10 @@ def _cash_event_to_activity_row(event: Dict[str, Any]) -> Optional[Dict[str, Any
     event_date_et = str(event.get("event_date_et") or "").strip()
     if not event_id or not event_date_et:
         return None
-    try:
-        amount_usd = float(event.get("amount_usd") or 0.0)
-    except Exception:
-        amount_usd = 0.0
+    amount_usd = _float_or_none(event.get("amount_usd")) or 0.0
+    cash_effect_usd = _float_or_none(event.get("cash_effect_usd"))
+    if cash_effect_usd is None:
+        cash_effect_usd = amount_usd if kind == "deposit" else -amount_usd
     return {
         "trade_id": event_id,
         "trade_date_et": event_date_et,
@@ -164,7 +218,10 @@ def _cash_event_to_activity_row(event: Dict[str, Any]) -> Optional[Dict[str, Any
         "side": "DEPOSIT" if kind == "deposit" else "WITHDRAWAL",
         "time_tw": None,
         "cash_amount": amount_usd,
+        "cash_effect": cash_effect_usd,
         "cash_basis": "External Cash Flow",
+        "buy_fee": None,
+        "sell_fee": None,
         "notes": str(event.get("note") or "").strip(),
         "source": str(event.get("source") or "").strip(),
         "activity_type": "cash_event",
@@ -175,9 +232,7 @@ def _build_report_activities(trades: List[Dict[str, Any]], cash_events: List[Dic
     activities: List[Dict[str, Any]] = []
     for item in sorted(trades, key=_trade_note_sort_key):
         if isinstance(item, dict):
-            row = dict(item)
-            row.setdefault("activity_type", "trade")
-            activities.append(row)
+            activities.append(_trade_to_activity_row(item))
     for item in sorted(cash_events, key=_cash_event_sort_key):
         if not isinstance(item, dict):
             continue

@@ -173,7 +173,9 @@ class ReportingSafetyTests(unittest.TestCase):
                     {"header": "Trade ID", "value": {"path": "trade_id"}, "format": "int"},
                     {"header": "Ticker", "value": {"path": "ticker"}},
                     {"header": "Shares", "value": {"path": "shares"}, "format": "int", "align": "right"},
-                    {"header": "Amount", "value": {"path": "cash_amount"}, "format": "usd2", "align": "right"},
+                    {"header": "Buy Fee", "value": {"path": "buy_fee"}, "format": "usd2", "align": "right"},
+                    {"header": "Sell Fee", "value": {"path": "sell_fee"}, "format": "usd2", "align": "right"},
+                    {"header": "Net Cash", "value": {"path": "cash_effect"}, "format": "usd2", "align": "right"},
                 ]
             },
             "grouping": {
@@ -192,21 +194,24 @@ class ReportingSafetyTests(unittest.TestCase):
                         "label": "Total",
                         "cells": {
                             "Shares": {"path": "totals.shares", "format": "int"},
-                            "Amount": {"path": "totals.cash_amount", "format": "usd2"},
+                            "Buy Fee": {"path": "totals.buy_fee", "format": "usd2"},
+                            "Sell Fee": {"path": "totals.sell_fee", "format": "usd2"},
+                            "Net Cash": {"path": "totals.cash_effect", "format": "usd2"},
                         },
                     }
                 ]
             },
         }
         rows = [
-            {"trade_id": 1, "trade_date_et": "2026-03-18", "ticker": "AAA", "shares": 2, "cash_amount": 100.0},
-            {"trade_id": 2, "trade_date_et": "2026-03-18", "ticker": "CASH", "shares": None, "cash_amount": 300.0},
+            {"trade_id": 1, "trade_date_et": "2026-03-18", "ticker": "AAA", "shares": 2, "buy_fee": 1.0, "cash_effect": -101.0},
+            {"trade_id": 2, "trade_date_et": "2026-03-18", "ticker": "BBB", "shares": 3, "sell_fee": 2.0, "cash_effect": 198.0},
+            {"trade_id": 3, "trade_date_et": "2026-03-18", "ticker": "CASH", "shares": None, "cash_effect": -50.0},
         ]
 
         markdown = reporting.render_grouped_trade_table(table_spec, rows, schema, {}, "-")
 
         self.assertIn("### Trade Date (ET): 2026-03-18", markdown)
-        self.assertIn("| Total | - | 2 | $400.00 |", markdown)
+        self.assertIn("| Total | - | 5 | $1.00 | $2.00 | $47.00 |", markdown)
 
     def test_report_spec_sorts_signal_status_by_b_minus_a_desc(self) -> None:
         schema = reporting.load_schema(str(REPO_ROOT / "report_spec.json"))
