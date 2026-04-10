@@ -95,8 +95,28 @@ def _load_trades_payload(path: str) -> Optional[List[Dict[str, Any]]]:
     return None
 
 
+def _load_cash_events_payload(path: str) -> Optional[List[Dict[str, Any]]]:
+    p = Path(path)
+    if not p.exists():
+        return None
+    obj = json.loads(p.read_text(encoding="utf-8"))
+    if isinstance(obj, list):
+        return [dict(event) for event in obj if isinstance(event, dict)]
+    if isinstance(obj, dict) and isinstance(obj.get("cash_events"), list):
+        return [dict(event) for event in (obj.get("cash_events") or []) if isinstance(event, dict)]
+    return None
+
+
 def _save_trades_payload(trades: List[Dict[str, Any]], path: str) -> str:
     payload = json.dumps(trades, ensure_ascii=False, indent=2)
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(payload, encoding="utf-8")
+    return str(p)
+
+
+def _save_cash_events_payload(cash_events: List[Dict[str, Any]], path: str) -> str:
+    payload = json.dumps(cash_events, ensure_ascii=False, indent=2)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(payload, encoding="utf-8")
@@ -109,6 +129,18 @@ def _compact_trade_row(trade: Dict[str, Any]) -> Dict[str, Any]:
         if key not in trade:
             continue
         value = trade.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        out[key] = value
+    return out
+
+
+def _compact_cash_event_row(cash_event: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key in ("event_id", "event_date_et", "kind", "amount_usd", "cash_effect_usd", "bucket_from", "bucket_to", "note", "source", "ts_utc"):
+        if key not in cash_event:
+            continue
+        value = cash_event.get(key)
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
         out[key] = value
@@ -185,6 +217,8 @@ def _compact_persistent_states(states: Dict[str, Any]) -> Dict[str, Any]:
         cash["usd"] = float(cash.get("usd") or 0.0)
     except Exception:
         cash["usd"] = 0.0
+    for key in ("external_flows", "internal_transfers", "external_cash_flow", "net_external_cash_flow_usd"):
+        cash.pop(key, None)
 
     portfolio.pop("totals", None)
     performance = portfolio.get("performance")

@@ -621,6 +621,7 @@ class StateEngineModeGateTests(unittest.TestCase):
             states="states.json",
             config="config.json",
             trades_file="trades.json",
+            cash_events_file="cash_events.json",
             csv_dir="data",
             allow_incomplete_csv_rows=False,
             tickers="",
@@ -682,6 +683,8 @@ class StateEngineModeGateTests(unittest.TestCase):
                 "_load_runtime_config",
                 return_value={"reporting": {"numeric_precision": _numeric_precision()}},
             ), mock.patch.object(state_engine, "_load_trades_payload", return_value=[]), mock.patch.object(
+                state_engine, "_load_cash_events_payload", return_value=[]
+            ), mock.patch.object(
                 state_engine, "_migrate_state_schema"
             ), mock.patch.object(state_engine, "_ensure_trading_calendar"), mock.patch.object(
                 state_engine, "_ensure_cash_buckets"
@@ -714,6 +717,8 @@ class StateEngineModeGateTests(unittest.TestCase):
                 "_load_runtime_config",
                 return_value={"reporting": {"numeric_precision": _numeric_precision()}},
             ), mock.patch.object(state_engine, "_load_trades_payload", return_value=[]), mock.patch.object(
+                state_engine, "_load_cash_events_payload", return_value=[]
+            ), mock.patch.object(
                 state_engine, "_migrate_state_schema"
             ), mock.patch.object(state_engine, "_ensure_trading_calendar"), mock.patch.object(
                 state_engine, "_ensure_cash_buckets"
@@ -769,8 +774,6 @@ class StateEngineModeGateTests(unittest.TestCase):
                         "deployable_usd": 9.5,
                         "reserve_usd": 2.0,
                         "baseline_usd": 100.0,
-                        "net_external_cash_flow_usd": -8.0,
-                        "external_flows": [{"amount_usd": -8.0, "kind": "withdrawal"}],
                     },
                     "totals": {"portfolio": {"nav_usd": 41.5}},
                     "performance": {
@@ -801,8 +804,6 @@ class StateEngineModeGateTests(unittest.TestCase):
                         "deployable_usd": 9.5,
                         "reserve_usd": 2.0,
                         "baseline_usd": 100.0,
-                        "net_external_cash_flow_usd": -8.0,
-                        "external_flows": [{"amount_usd": -8.0, "kind": "withdrawal"}],
                     },
                     "performance": {
                         "initial_investment_usd": 120.0,
@@ -827,6 +828,7 @@ class StateEngineModeGateTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(state_engine, "_load_json", return_value={"portfolio": {"cash": {"usd": 1.0}, "positions": []}}))
             stack.enter_context(mock.patch.object(state_engine, "_load_runtime_config", return_value={"reporting": {"numeric_precision": _numeric_precision()}}))
             stack.enter_context(mock.patch.object(state_engine, "_load_trades_payload", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_load_cash_events_payload", return_value=[]))
             stack.enter_context(mock.patch.object(state_engine, "_migrate_state_schema"))
             stack.enter_context(mock.patch.object(state_engine, "_ensure_trading_calendar"))
             stack.enter_context(mock.patch.object(state_engine, "_ensure_cash_buckets"))
@@ -847,6 +849,7 @@ class StateEngineModeGateTests(unittest.TestCase):
             ))
             stack.enter_context(mock.patch.object(state_engine, "ensure_report_root_fields", return_value=[]))
             stack.enter_context(mock.patch.object(state_engine, "_save_trades_payload", return_value="trades.json"))
+            stack.enter_context(mock.patch.object(state_engine, "_save_cash_events_payload", return_value="cash_events.json"))
             stack.enter_context(mock.patch.object(state_engine, "_save_json", side_effect=lambda obj, path: saved_paths.append(str(path)) or str(path)))
             stack.enter_context(mock.patch.object(state_engine, "_render_report_output", return_value=("# Daily Investment Report (Intraday)\n", "report/2026-03-18_intraday.md")))
             stack.enter_context(mock.patch.object(Path, "write_text", return_value=0))

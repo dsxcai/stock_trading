@@ -1,0 +1,26 @@
+[
+  {
+    "event_id": "cash-00001",
+    "event_date_et": "2026-03-12",
+    "kind": "withdrawal",
+    "amount_usd": 717.95,
+    "cash_effect_usd": -717.95,
+    "bucket_from": "portfolio_cash",
+    "bucket_to": "external",
+    "note": "Cash withdrawal / capital reduction",
+    "source": "update_states",
+    "ts_utc": "2026-03-13T02:55:26Z"
+  },
+  {
+    "event_id": "cash-00002",
+    "event_date_et": "2026-03-17",
+    "kind": "withdrawal",
+    "amount_usd": 7007.51,
+    "cash_effect_usd": -7007.51,
+    "bucket_from": "portfolio_cash",
+    "bucket_to": "external",
+    "note": "Withdrawal on 3/17",
+    "source": "update_states",
+    "ts_utc": "2026-03-17T19:55:22Z"
+  }
+]

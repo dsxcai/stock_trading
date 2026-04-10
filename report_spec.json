@@ -2,7 +2,7 @@
 ```json
 {
   "spec_name": "report_spec",
-  "spec_version": "1.2.0",
+  "spec_version": "1.3.0",
   "output": {
     "format": "markdown",
     "table_style": "pipe",
@@ -28,8 +28,8 @@
         { "key": { "path": "ticker" }, "order": "asc" }
       ]
     },
-    "trades": {
-      "row_source": { "path": "$.trades[*]" },
+    "activities": {
+      "row_source": { "path": "$.activities[*]" },
       "sort": [
         { "key": { "path": "trade_date_et" }, "order": "desc" },
         { "key": { "path": "time_tw" }, "order": "desc" }
@@ -320,7 +320,7 @@
     {
       "id": "trades_details_v2",
       "title": "Trade Details",
-      "dataset": "trades",
+      "dataset": "activities",
       "grouping": {
         "group_by": { "path": "trade_date_et" },
         "order": "desc",
@@ -352,6 +352,28 @@
           { "header": "Time (TW)", "value": { "path": "time_tw" }, "format": "datetime" },
           { "header": "Shares", "value": { "path": "shares" }, "format": "int", "align": "right" },
           { "header": "Amount", "value": { "path": "cash_amount" }, "format": "usd2", "align": "right" }
+        ]
+      },
+      "group_footer_rows": {
+        "full": [
+          {
+            "label": "Total",
+            "cells": {
+              "Shares": { "path": "totals.shares", "format": "int" },
+              "Gross": { "path": "totals.gross", "format": "usd2" },
+              "Fee": { "path": "totals.fee", "format": "usd2" },
+              "Cash Amount": { "path": "totals.cash_amount", "format": "usd2" }
+            }
+          }
+        ],
+        "simple": [
+          {
+            "label": "Total",
+            "cells": {
+              "Shares": { "path": "totals.shares", "format": "int" },
+              "Amount": { "path": "totals.cash_amount", "format": "usd2" }
+            }
+          }
         ]
       },
       "group_rendering": {

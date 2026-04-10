@@ -205,17 +205,29 @@ def render_table_md(headers: List[str], rows: List[List[str]], aligns: List[Opti
     body = '\n'.join(('| ' + ' | '.join(r) + ' |' for r in rows))
     return '\n'.join([sep, align_row, body]) if body else '\n'.join([sep, align_row])
 
+
+def _numeric_value(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
 def _sort_key(v: Any) -> Any:
     if v is None:
-        return (1, '')
+        return (-1, 9, '')
     if isinstance(v, (int, float)):
-        return (0, v)
+        return (0, 0, float(v))
+    if isinstance(v, datetime):
+        return (0, 1, v.isoformat())
     if isinstance(v, str):
+        if not v.strip():
+            return (-1, 9, '')
         d = _parse_dateish(v)
         if d:
-            return (0, d)
-        return (0, v)
-    return (0, str(v))
+            return (0, 1, d.isoformat())
+        return (0, 2, v)
+    return (0, 3, str(v))
 
 def build_dataset(schema: Dict[str, Any], states: Dict[str, Any], dataset_id: str) -> List[Dict[str, Any]]:
     ds = (schema.get('datasets') or {}).get(dataset_id) or {}
@@ -283,6 +295,46 @@ def render_simple_table(table_spec: Dict[str, Any], rows: List[Dict[str, Any]], 
         out_rows.append(fr_cells)
     return render_table_md(headers, out_rows, aligns)
 
+
+def _group_numeric_totals(rows: List[Dict[str, Any]]) -> Dict[str, float]:
+    totals: Dict[str, float] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key, value in row.items():
+            numeric = _numeric_value(value)
+            if numeric is None:
+                continue
+            totals[key] = totals.get(key, 0.0) + numeric
+    return totals
+
+
+def _render_group_footer_rows(
+    footer_specs: List[Dict[str, Any]],
+    columns: List[Dict[str, Any]],
+    headers: List[str],
+    schema: Dict[str, Any],
+    states: Dict[str, Any],
+    null_display: str,
+    group_context: Dict[str, Any],
+) -> List[List[str]]:
+    rendered: List[List[str]] = []
+    if not footer_specs:
+        return rendered
+    header_to_index = {header: idx for idx, header in enumerate(headers)}
+    for footer_spec in footer_specs:
+        cells = [null_display for _ in columns]
+        if columns:
+            cells[0] = str(footer_spec.get('label') or '')
+        for header, cell_def in (footer_spec.get('cells') or {}).items():
+            if header not in header_to_index:
+                continue
+            idx = header_to_index[header]
+            val = eval_expr(cell_def, group_context, states)
+            cells[idx] = format_value(val, cell_def.get('format'), schema, null_display)
+        rendered.append(cells)
+    return rendered
+
 def render_grouped_trade_table(table_spec: Dict[str, Any], rows: List[Dict[str, Any]], schema: Dict[str, Any], states: Dict[str, Any], null_display: str) -> str:
     grouping = table_spec.get('grouping') or {}
     group_by_path = (grouping.get('group_by') or {}).get('path') if isinstance(grouping.get('group_by'), dict) else None
@@ -339,6 +391,19 @@ def render_grouped_trade_table(table_spec: Dict[str, Any], rows: List[Dict[str, 
                 val = eval_expr(c.get('value') or {}, r, states)
                 row_cells.append(format_value(val, c.get('format'), schema, null_display))
             body_rows.append(row_cells)
+        footer_rows_cfg = table_spec.get('group_footer_rows') or []
+        if isinstance(footer_rows_cfg, dict):
+            footer_specs = footer_rows_cfg.get(col_key) or []
+        else:
+            footer_specs = footer_rows_cfg
+        group_context = {
+            'group_key': gk,
+            'group_index': gi,
+            'group_size': len(groups[gk]),
+            'rows': groups[gk],
+            'totals': _group_numeric_totals(groups[gk]),
+        }
+        body_rows.extend(_render_group_footer_rows(footer_specs, columns, headers, schema, states, null_display, group_context))
         md_parts.append(render_table_md(headers, body_rows, aligns))
         md_parts.append('')
     return '\n'.join(md_parts).rstrip() + '\n'

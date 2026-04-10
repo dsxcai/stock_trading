@@ -60,6 +60,10 @@ def config_trades_file(config: Dict[str, Any]) -> str:
     return str(config_meta(config).get("trades_file") or "").strip()
 
 
+def config_cash_events_file(config: Dict[str, Any]) -> str:
+    return str(config_meta(config).get("cash_events_file") or "").strip()
+
+
 def config_fee_rate(config: Dict[str, Any]) -> Any:
     return config_execution(config).get("fee_rate")
 

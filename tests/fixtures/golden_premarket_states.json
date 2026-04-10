@@ -19,30 +19,6 @@
       "baseline_usd": 35426.5,
       "baseline_source": "manual_cash_adjustment",
       "derived_from_trades": true,
-      "external_cash_flow": {
-        "net_usd": -7725.46,
-        "flow_count": 2,
-        "last_flow_asof_et": "2026-03-17",
-        "last_flow_kind": "withdrawal",
-        "last_flow_amount_usd": -7007.51
-      },
-      "net_external_cash_flow_usd": -7725.46,
-      "external_flows": [
-        {
-          "amount_usd": -717.95,
-          "kind": "withdrawal",
-          "asof_et": "2026-03-12",
-          "note": "Cash withdrawal / capital reduction",
-          "ts_utc": "2026-03-13T02:55:26Z"
-        },
-        {
-          "amount_usd": -7007.51,
-          "kind": "withdrawal",
-          "asof_et": "2026-03-17",
-          "note": "Withdrawal on 3/17",
-          "ts_utc": "2026-03-17T19:55:22Z"
-        }
-      ],
       "deployable_usd": 73.35,
       "reserve_usd": 0.0,
       "bucket": "tactical_pool"

@@ -11,7 +11,7 @@ from core import reporting as runtime
 from core.report_meta import _migrate_state_schema, _normalize_mode_key
 from core.report_context import _ensure_trading_calendar, _resolve_runtime_report_meta
 from core.report_output import _build_report_output
-from core.runtime_io import _load_runtime_config, _load_trades_payload
+from core.runtime_io import _load_cash_events_payload, _load_runtime_config, _load_trades_payload
 from core.state_engine import (
     _compute_keep_history_rows,
     _discover_tickers_from_config,
@@ -23,7 +23,7 @@ from core.state_engine import (
     _update_portfolio_performance,
 )
 from core.tactical_engine import compute_tactical_plan
-from utils.config_access import config_trades_file
+from utils.config_access import config_cash_events_file, config_trades_file
 from utils.dates import ET_TZ
 from utils.logger import configure_logging, emit, log_run_header
 from utils.precision import state_engine_numeric_precision
@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--states", default="states.json")
     parser.add_argument("--config", default="config.json", help="External config JSON path")
     parser.add_argument("--trades-file", default="", help="Optional external trades JSON path. Default: config state_engine.meta.trades_file or trades.json")
+    parser.add_argument("--cash-events-file", default="", help="Optional external cash-events JSON path. Default: config state_engine.meta.cash_events_file or cash_events.json")
     parser.add_argument("--schema", default="report_spec.json", help="report_schema.md or report_spec.json")
     parser.add_argument("--mode", required=True, help="Mode snapshot to render, such as Premarket, Intraday, or AfterClose")
     parser.add_argument("--date", default="", help="Optional YYYY-MM-DD used only for the output filename")
@@ -66,11 +67,17 @@ def run_args(args: argparse.Namespace, *, argv: list[str] | None = None) -> int:
         numeric_precision = state_engine_numeric_precision(config)
         engine_runtime = {"config": config, "history": {}}
         trades_file = args.trades_file.strip() or config_trades_file(config) or "trades.json"
+        cash_events_file = args.cash_events_file.strip() or config_cash_events_file(config) or "cash_events.json"
         trades_path = Path(trades_file)
         if not trades_path.is_absolute():
             trades_path = Path(args.states).resolve().parent / trades_path
+        cash_events_path = Path(cash_events_file)
+        if not cash_events_path.is_absolute():
+            cash_events_path = Path(args.states).resolve().parent / cash_events_path
         loaded_trades = _load_trades_payload(str(trades_path))
+        loaded_cash_events = _load_cash_events_payload(str(cash_events_path))
         trades = loaded_trades if isinstance(loaded_trades, list) else []
+        cash_events = loaded_cash_events if isinstance(loaded_cash_events, list) else []
         _migrate_state_schema(states, ensure_broker_snapshot=True)
         _ensure_trading_calendar(engine_runtime)
         _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
@@ -100,7 +107,7 @@ def run_args(args: argparse.Namespace, *, argv: list[str] | None = None) -> int:
         )
         _rebuild_market_snapshot_from_history(states, engine_runtime)
         _reprice_and_totals(states, engine_runtime)
-        _update_portfolio_performance(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+        _update_portfolio_performance(states, cash_events, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
         tactical_plan = compute_tactical_plan(
             states,
             engine_runtime,
@@ -117,6 +124,7 @@ def run_args(args: argparse.Namespace, *, argv: list[str] | None = None) -> int:
             mode=args.mode,
             config=config,
             trades=trades,
+            cash_events=cash_events,
             tactical_plan=tactical_plan,
             report_meta=report_meta,
             market_history=engine_runtime.get("history"),

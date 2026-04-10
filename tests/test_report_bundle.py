@@ -28,14 +28,17 @@ class ReportBundleTests(unittest.TestCase):
 
         report_root = build_report_root(
             states,
-            config={"meta": {"doc": "x", "trades_file": "trades.json"}},
+            config={"meta": {"doc": "x", "trades_file": "trades.json", "cash_events_file": "cash_events.json"}},
             trades=[{"trade_id": 1, "ticker": "AAA"}],
+            cash_events=[{"event_id": "cash-00001", "event_date_et": "2026-03-18", "kind": "deposit", "amount_usd": 500.0, "cash_effect_usd": 500.0}],
             tactical_plan=plan,
         )
 
         self.assertEqual(states, baseline)
         self.assertEqual(report_root["config"]["meta"]["doc"], "x")
         self.assertEqual(report_root["trades"][0]["ticker"], "AAA")
+        self.assertEqual(report_root["cash_events"][0]["event_id"], "cash-00001")
+        self.assertEqual([row["trade_id"] for row in report_root["activities"]], [1, "cash-00001"])
         self.assertEqual(report_root["signals"]["tactical"][0]["t_plus_1_action"], "BUY")
         self.assertEqual(report_root["thresholds"]["buy_signal_close_price_thresholds"][0]["threshold"], 11.0)
         self.assertEqual(report_root["market"]["signals_inputs"]["AAA"]["close_t"], 10.0)
@@ -43,6 +46,37 @@ class ReportBundleTests(unittest.TestCase):
         self.assertNotIn("trades", states)
         self.assertNotIn("signals", states)
         self.assertNotIn("thresholds", states)
+
+    def test_build_report_root_merges_external_cash_events_into_activities_only(self) -> None:
+        states = {
+            "portfolio": {
+                "positions": [
+                    {"ticker": "AAA", "shares": 1, "notes": "stale"},
+                ],
+                "cash": {},
+                "totals": {},
+            }
+        }
+        trades = [
+            {"trade_id": 1, "ticker": "AAA", "trade_date_et": "2026-03-17", "time_tw": "2026/03/17 22:00:00", "side": "BUY", "shares": 1, "cash_amount": 100.0, "notes": "open lot"},
+        ]
+        cash_events = [
+            {"event_id": "cash-00001", "event_date_et": "2026-03-18", "kind": "deposit", "amount_usd": 500.0, "cash_effect_usd": 500.0, "note": "deposit"},
+            {"event_id": "cash-00002", "event_date_et": "2026-03-19", "kind": "to_reserve", "amount_usd": 100.0, "cash_effect_usd": 0.0, "note": "internal"},
+            {"event_id": "cash-00003", "event_date_et": "2026-03-20", "kind": "withdrawal", "amount_usd": 300.0, "cash_effect_usd": -300.0, "note": "withdraw"},
+        ]
+
+        report_root = build_report_root(states, trades=trades, cash_events=cash_events)
+
+        self.assertEqual(
+            [(row["trade_id"], row["ticker"], row["side"]) for row in report_root["activities"]],
+            [
+                (1, "AAA", "BUY"),
+                ("cash-00001", "CASH", "DEPOSIT"),
+                ("cash-00003", "CASH", "WITHDRAWAL"),
+            ],
+        )
+        self.assertEqual(report_root["portfolio"]["positions"][0]["notes"], "open lot x1")
 
     def test_build_report_root_derives_position_notes_from_trades(self) -> None:
         states = {

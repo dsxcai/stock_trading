@@ -6,6 +6,7 @@ from typing import Any, Dict, Literal, Optional
 JSONDict = Dict[str, Any]
 TradeSide = Literal["BUY", "SELL"]
 ImportStatus = Literal["imported", "skipped_missing", "error"]
+CashEventKind = Literal["deposit", "withdrawal", "to_reserve", "to_deployable"]
 
 
 @dataclass(slots=True)
@@ -144,3 +145,32 @@ class TradeRecord:
         }
         payload.update(self.extras)
         return payload
+
+
+@dataclass(slots=True)
+class CashEventRecord:
+    """Append-only cash ledger entry kept outside states.json."""
+    event_id: str
+    event_date_et: str
+    kind: CashEventKind
+    amount_usd: float
+    cash_effect_usd: float
+    bucket_from: str = ""
+    bucket_to: str = ""
+    note: str = ""
+    source: str = ""
+    ts_utc: str = ""
+
+    def as_dict(self) -> JSONDict:
+        return {
+            "event_id": self.event_id,
+            "event_date_et": self.event_date_et,
+            "kind": self.kind,
+            "amount_usd": self.amount_usd,
+            "cash_effect_usd": self.cash_effect_usd,
+            "bucket_from": self.bucket_from,
+            "bucket_to": self.bucket_to,
+            "note": self.note,
+            "source": self.source,
+            "ts_utc": self.ts_utc,
+        }

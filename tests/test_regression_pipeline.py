@@ -17,6 +17,7 @@ FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 FIXTURE_MARKET_DATA_DIR = FIXTURES_DIR / "market_data"
 FIXTURE_STATES = FIXTURES_DIR / "golden_premarket_states.json"
 FIXTURE_TRADES = FIXTURES_DIR / "golden_premarket_trades.json"
+FIXTURE_CASH_EVENTS = FIXTURES_DIR / "golden_premarket_cash_events.json"
 FIXED_NOW_ET = "2026-03-18T08:00:00-04:00"
 PROJECT_CORE_ITEMS = [
     "config.json",
@@ -34,6 +35,7 @@ def _copy_project(
     *,
     states_src: Path,
     trades_src: Path,
+    cash_events_src: Path,
     data_src: Path,
 ) -> None:
     for name in PROJECT_CORE_ITEMS:
@@ -47,6 +49,7 @@ def _copy_project(
             shutil.copy2(src, target)
     shutil.copy2(states_src, dst / "states.json")
     shutil.copy2(trades_src, dst / "trades.json")
+    shutil.copy2(cash_events_src, dst / "cash_events.json")
     shutil.copytree(data_src, dst / "data")
 
 
@@ -136,6 +139,7 @@ class RegressionPipelineTests(unittest.TestCase):
                 workdir,
                 states_src=FIXTURE_STATES,
                 trades_src=FIXTURE_TRADES,
+                cash_events_src=FIXTURE_CASH_EVENTS,
                 data_src=FIXTURE_MARKET_DATA_DIR,
             )
             _run_premarket_update(workdir)
@@ -155,6 +159,7 @@ class RegressionPipelineTests(unittest.TestCase):
                 workdir,
                 states_src=FIXTURE_STATES,
                 trades_src=FIXTURE_TRADES,
+                cash_events_src=FIXTURE_CASH_EVENTS,
                 data_src=FIXTURE_MARKET_DATA_DIR,
             )
             subprocess.run(
@@ -192,6 +197,7 @@ class RegressionPipelineTests(unittest.TestCase):
                 workdir,
                 states_src=FIXTURE_STATES,
                 trades_src=FIXTURE_TRADES,
+                cash_events_src=FIXTURE_CASH_EVENTS,
                 data_src=FIXTURE_MARKET_DATA_DIR,
             )
             _run_premarket_update(workdir)
@@ -221,6 +227,7 @@ class RegressionPipelineTests(unittest.TestCase):
                 workdir,
                 states_src=FIXTURE_STATES,
                 trades_src=FIXTURE_TRADES,
+                cash_events_src=FIXTURE_CASH_EVENTS,
                 data_src=FIXTURE_MARKET_DATA_DIR,
             )
             _run_premarket_update(workdir)
@@ -236,6 +243,7 @@ class RegressionPipelineTests(unittest.TestCase):
                 workdir,
                 states_src=FIXTURE_STATES,
                 trades_src=FIXTURE_TRADES,
+                cash_events_src=FIXTURE_CASH_EVENTS,
                 data_src=FIXTURE_MARKET_DATA_DIR,
             )
             base_cmd = [
@@ -299,6 +307,7 @@ class LiveDataSmokeTests(unittest.TestCase):
                 workdir,
                 states_src=REPO_ROOT / "states.json",
                 trades_src=REPO_ROOT / "trades.json",
+                cash_events_src=REPO_ROOT / "cash_events.json",
                 data_src=REPO_ROOT / "data",
             )
             _run_premarket_update(workdir, out_states="live_out_states.json", out_report="live_out_report.md")

@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.models import ImportResult
+from core.models import CashEventRecord, ImportResult
 from core.report_bundle import build_report_root, ensure_report_root_fields
 from core.report_context import (
     _ensure_trading_calendar,
@@ -39,8 +39,10 @@ from core.reconciliation import (
     _verify_holdings_with_broker_investment_total,
 )
 from core.runtime_io import (
+    _compact_cash_event_row,
     _compact_persistent_states,
     _compact_trade_row,
+    _load_cash_events_payload,
     _load_json,
     _load_runtime_config,
     _load_trades_payload,
@@ -52,6 +54,7 @@ from core.runtime_io import (
     _runtime_numeric_precision,
     _runtime_report_meta,
     _runtime_signal_basis_day,
+    _save_cash_events_payload,
     _save_json,
     _save_trades_payload,
     _strip_persisted_report_transients,
@@ -72,6 +75,7 @@ from core.trade_imports import (
 )
 from utils.config_access import (
     config_buckets,
+    config_cash_events_file,
     config_csv_sources,
     config_fx_pairs,
     config_tactical_indicators,
@@ -531,18 +535,72 @@ def _net_cash_change_from_trades(trades: List[Dict[str, Any]], cutoff_et_dt: Opt
             warns.append(f"trade_id={t.get('trade_id')}: unknown side='{t.get('side')}', ignored in cash ledger")
     return (net, warns)
 
-def _sync_cash_external_flow_summary(states: Dict[str, Any], usd_amount_ndigits: int) -> None:
-    portfolio = states.setdefault('portfolio', {})
-    cash = portfolio.setdefault('cash', {'usd': 0.0, 'bucket': 'tactical_pool'})
-    flows = cash.get('external_flows') or []
-    net_external = round_with_precision(cash.get('net_external_cash_flow_usd') or 0.0, usd_amount_ndigits)
-    last_flow = None
-    if isinstance(flows, list):
-        for item in reversed(flows):
-            if isinstance(item, dict):
-                last_flow = item
-                break
-    cash['external_cash_flow'] = {'net_usd': net_external, 'flow_count': len(flows) if isinstance(flows, list) else 0, 'last_flow_asof_et': str(last_flow.get('asof_et') or '').strip() if isinstance(last_flow, dict) else '', 'last_flow_kind': str(last_flow.get('kind') or '').strip() if isinstance(last_flow, dict) else '', 'last_flow_amount_usd': round_with_precision(last_flow.get('amount_usd') or 0.0, usd_amount_ndigits) if isinstance(last_flow, dict) and last_flow.get('amount_usd') is not None else None}
+def _strip_legacy_cash_history_fields(states: Dict[str, Any]) -> None:
+    cash = ((states.get('portfolio') or {}).get('cash')) or {}
+    if not isinstance(cash, dict):
+        return
+    for key in ('external_flows', 'internal_transfers', 'external_cash_flow', 'net_external_cash_flow_usd'):
+        cash.pop(key, None)
+
+
+def _cash_event_timestamp_utc() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+
+
+def _next_cash_event_id(cash_events: List[Dict[str, Any]]) -> str:
+    max_id = 0
+    for item in cash_events or []:
+        if not isinstance(item, dict):
+            continue
+        raw = str(item.get('event_id') or '').strip()
+        m = re.match(r'^cash-(\d+)$', raw)
+        if not m:
+            continue
+        max_id = max(max_id, int(m.group(1)))
+    return f'cash-{max_id + 1:05d}'
+
+
+def _append_cash_event(
+    cash_events: List[Dict[str, Any]],
+    *,
+    event_date_et: str,
+    kind: str,
+    amount_usd: float,
+    cash_effect_usd: float,
+    bucket_from: str,
+    bucket_to: str,
+    note: str = '',
+    source: str = 'update_states',
+) -> Dict[str, Any]:
+    record = CashEventRecord(
+        event_id=_next_cash_event_id(cash_events),
+        event_date_et=str(event_date_et or '').strip(),
+        kind=str(kind).strip().lower(),
+        amount_usd=float(amount_usd),
+        cash_effect_usd=float(cash_effect_usd),
+        bucket_from=str(bucket_from or '').strip(),
+        bucket_to=str(bucket_to or '').strip(),
+        note=str(note or '').strip(),
+        source=str(source or '').strip(),
+        ts_utc=_cash_event_timestamp_utc(),
+    ).as_dict()
+    cash_events.append(record)
+    return record
+
+
+def _net_external_cash_flow_from_events(cash_events: List[Dict[str, Any]], usd_amount_ndigits: int) -> float:
+    net = 0.0
+    for item in cash_events or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get('kind') or '').strip().lower()
+        if kind not in {'deposit', 'withdrawal'}:
+            continue
+        try:
+            net += float(item.get('cash_effect_usd') or 0.0)
+        except Exception:
+            continue
+    return round_with_precision(net, usd_amount_ndigits)
 
 def _ensure_cash_buckets(states: Dict[str, Any], usd_amount_ndigits: int) -> None:
     portfolio = states.setdefault('portfolio', {})
@@ -587,7 +645,7 @@ def _set_total_cash_preserve_reserve(states: Dict[str, Any], total_cash_usd: flo
     cash['reserve_usd'] = reserve
     cash['usd'] = round_with_precision(deployable + reserve, usd_amount_ndigits)
 
-def _apply_cash_transfer_to_reserve(states: Dict[str, Any], amount_usd: float, usd_amount_ndigits: int, asof_et: Optional[str]=None) -> None:
+def _apply_cash_transfer_to_reserve(states: Dict[str, Any], cash_events: List[Dict[str, Any]], amount_usd: float, usd_amount_ndigits: int, asof_et: Optional[str]=None) -> None:
     _ensure_cash_buckets(states, usd_amount_ndigits=usd_amount_ndigits)
     cash = states.setdefault('portfolio', {}).setdefault('cash', {'usd': 0.0, 'bucket': 'tactical_pool'})
     amt = round_with_precision(amount_usd, usd_amount_ndigits)
@@ -602,8 +660,15 @@ def _apply_cash_transfer_to_reserve(states: Dict[str, Any], amount_usd: float, u
     cash['deployable_usd'] = round_with_precision(deployable - amt, usd_amount_ndigits)
     cash['reserve_usd'] = round_with_precision(reserve + amt, usd_amount_ndigits)
     cash['usd'] = round_with_precision(float(cash['deployable_usd']) + float(cash['reserve_usd']), usd_amount_ndigits)
-    transfers = cash.setdefault('internal_transfers', [])
-    transfers.append({'amount_usd': amt, 'kind': 'to_reserve' if amt > 0 else 'to_deployable', 'asof_et': str(asof_et or '').strip(), 'ts_utc': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')})
+    _append_cash_event(
+        cash_events,
+        event_date_et=str(asof_et or '').strip(),
+        kind='to_reserve' if amt > 0 else 'to_deployable',
+        amount_usd=abs(amt),
+        cash_effect_usd=0.0,
+        bucket_from='deployable' if amt > 0 else 'reserve',
+        bucket_to='reserve' if amt > 0 else 'deployable',
+    )
     print(f"[CASH] applied internal cash transfer: amount_usd={format_fixed(amt, usd_amount_ndigits)}, deployable_usd={format_fixed(cash['deployable_usd'], usd_amount_ndigits)}, reserve_usd={format_fixed(cash['reserve_usd'], usd_amount_ndigits)}")
 
 def _set_initial_investment_usd(states: Dict[str, Any], amount_usd: float, usd_amount_ndigits: int) -> None:
@@ -622,7 +687,7 @@ def _clear_holdings_reconciliation_snapshot(states: Dict[str, Any]) -> None:
         broker.pop(key, None)
     broker.pop('reconciliation', None)
 
-def _apply_cash_adjustment(states: Dict[str, Any], trades: List[Dict[str, Any]], amount_usd: float, usd_amount_ndigits: int, note: str='', asof_et: Optional[str]=None) -> None:
+def _apply_cash_adjustment(states: Dict[str, Any], cash_events: List[Dict[str, Any]], trades: List[Dict[str, Any]], amount_usd: float, usd_amount_ndigits: int, note: str='', asof_et: Optional[str]=None) -> None:
     portfolio = states.setdefault('portfolio', {})
     _ensure_cash_buckets(states, usd_amount_ndigits=usd_amount_ndigits)
     cash = portfolio.setdefault('cash', {'usd': 0.0, 'bucket': 'tactical_pool'})
@@ -641,13 +706,19 @@ def _apply_cash_adjustment(states: Dict[str, Any], trades: List[Dict[str, Any]],
         cash['baseline_source'] = 'inferred_from_existing_cash'
     cash['baseline_usd'] = round_with_precision(float(baseline) + amt, usd_amount_ndigits)
     cash['baseline_source'] = 'manual_cash_adjustment'
-    cash['net_external_cash_flow_usd'] = round_with_precision(float(cash.get('net_external_cash_flow_usd') or 0.0) + amt, usd_amount_ndigits)
-    flows = cash.setdefault('external_flows', [])
-    flows.append({'amount_usd': amt, 'kind': 'deposit' if amt >= 0 else 'withdrawal', 'asof_et': str(asof_et or '').strip(), 'note': str(note or '').strip(), 'ts_utc': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')})
-    _sync_cash_external_flow_summary(states, usd_amount_ndigits=usd_amount_ndigits)
+    _append_cash_event(
+        cash_events,
+        event_date_et=str(asof_et or '').strip(),
+        kind='deposit' if amt >= 0 else 'withdrawal',
+        amount_usd=abs(amt),
+        cash_effect_usd=amt,
+        bucket_from='external' if amt >= 0 else 'portfolio_cash',
+        bucket_to='portfolio_cash' if amt >= 0 else 'external',
+        note=note,
+    )
     print(f"[CASH] applied external cash {('deposit' if amt >= 0 else 'withdrawal')}: amount_usd={format_fixed(amt, usd_amount_ndigits)}, baseline_usd={format_fixed(cash['baseline_usd'], usd_amount_ndigits)}")
 
-def _update_portfolio_performance(states: Dict[str, Any], usd_amount_ndigits: int) -> None:
+def _update_portfolio_performance(states: Dict[str, Any], cash_events: List[Dict[str, Any]], usd_amount_ndigits: int) -> None:
     portfolio = states.setdefault('portfolio', {})
     totals = portfolio.setdefault('totals', {})
     perf = portfolio.setdefault('performance', {})
@@ -661,11 +732,10 @@ def _update_portfolio_performance(states: Dict[str, Any], usd_amount_ndigits: in
             initial = float(initial)
         except Exception:
             initial = None
-    net_external = float(cash.get('net_external_cash_flow_usd') or 0.0)
+    net_external = _net_external_cash_flow_from_events(cash_events, usd_amount_ndigits=usd_amount_ndigits)
     perf['current_total_assets_usd'] = round_with_precision(current_total_assets, usd_amount_ndigits)
     perf['net_external_cash_flow_usd'] = round_with_precision(net_external, usd_amount_ndigits)
     returns['current_total_assets_usd'] = round_with_precision(current_total_assets, usd_amount_ndigits)
-    _sync_cash_external_flow_summary(states, usd_amount_ndigits=usd_amount_ndigits)
     baseline['net_external_cash_flow_usd'] = round_with_precision(net_external, usd_amount_ndigits)
     baseline['method'] = 'initial_investment_plus_net_external_cash_flow'
     if initial is None:
@@ -984,11 +1054,15 @@ def _run_main(args: argparse.Namespace) -> int:
     runtime: Dict[str, Any] = {'config': _load_runtime_config(config_path), 'history': {}}
     numeric_precision = state_engine_numeric_precision(_runtime_config(runtime))
     trades_file = str(getattr(args, 'trades_file', '') or config_trades_file(_runtime_config(runtime)) or 'trades.json').strip() or 'trades.json'
+    cash_events_file = str(getattr(args, 'cash_events_file', '') or config_cash_events_file(_runtime_config(runtime)) or 'cash_events.json').strip() or 'cash_events.json'
     external_trades = _load_trades_payload(trades_file)
+    external_cash_events = _load_cash_events_payload(cash_events_file)
     trades: List[Dict[str, Any]] = external_trades if isinstance(external_trades, list) else []
+    cash_events: List[Dict[str, Any]] = external_cash_events if isinstance(external_cash_events, list) else []
     _migrate_state_schema(states)
     _ensure_trading_calendar(runtime)
     _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+    _strip_legacy_cash_history_fields(states)
     _hydrate_positions_from_trade_ledger_if_needed(states, runtime, trades)
     mode_label = str(args.mode or '').strip()
     if not mode_label:
@@ -1142,8 +1216,9 @@ def _run_main(args: argparse.Namespace) -> int:
         broker_asof_et_datetime = str(args.broker_asof_et_datetime or '').strip() or None
     if args.initial_investment_usd is not None:
         _set_initial_investment_usd(states, float(args.initial_investment_usd), usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+    cash_event_date_et = str(broker_asof_et or now_et.strftime('%Y-%m-%d')).strip()
     if args.cash_adjust_usd is not None:
-        _apply_cash_adjustment(states, trades, amount_usd=float(args.cash_adjust_usd), usd_amount_ndigits=int(numeric_precision["usd_amount"]), note=str(args.cash_adjust_note or ''), asof_et=broker_asof_et if broker_asof_et else None)
+        _apply_cash_adjustment(states, cash_events, trades, amount_usd=float(args.cash_adjust_usd), usd_amount_ndigits=int(numeric_precision["usd_amount"]), note=str(args.cash_adjust_note or ''), asof_et=cash_event_date_et)
     if broker_investment_total_supplied:
         _verify_holdings_with_broker_investment_total(states, broker_investment_total_usd=broker_investment_total_usd, broker_asof_et=broker_asof_et if broker_asof_et else None, broker_investment_total_kind=str(args.broker_investment_total_kind), verify_tolerance_usd=float(args.verify_tolerance_usd))
     else:
@@ -1155,7 +1230,7 @@ def _run_main(args: argparse.Namespace) -> int:
     rec_status = str(rec.get('status') or 'N/A') if tactical_cash_usd is not None else 'SKIP'
     if args.cash_transfer_to_reserve_usd is not None:
         try:
-            _apply_cash_transfer_to_reserve(states, amount_usd=float(args.cash_transfer_to_reserve_usd), usd_amount_ndigits=int(numeric_precision["usd_amount"]), asof_et=broker_asof_et if broker_asof_et else None)
+            _apply_cash_transfer_to_reserve(states, cash_events, amount_usd=float(args.cash_transfer_to_reserve_usd), usd_amount_ndigits=int(numeric_precision["usd_amount"]), asof_et=cash_event_date_et)
         except Exception as e:
             print(f'[ABORT] invalid --cash-transfer-to-reserve-usd: {e}')
             print('[ABORT] No state update and no report file were generated.')
@@ -1173,7 +1248,7 @@ def _run_main(args: argparse.Namespace) -> int:
         )
     else:
         print('[INFO] signal/threshold refresh skipped because --mode was not supplied.')
-    _update_portfolio_performance(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+    _update_portfolio_performance(states, cash_events, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
     mismatches: List[Dict[str, Any]] = []
     broker_block = (states.get('portfolio', {}) or {}).get('broker', {}) or {}
     if broker_investment_total_supplied and str(broker_block.get('status') or '').upper() == 'MISMATCH':
@@ -1191,6 +1266,7 @@ def _run_main(args: argparse.Namespace) -> int:
         states,
         config=_runtime_config(runtime),
         trades=trades,
+        cash_events=cash_events,
         tactical_plan=tactical_plan,
         report_meta=report_meta,
         market_history=_runtime_history(runtime),
@@ -1245,7 +1321,12 @@ def _run_main(args: argparse.Namespace) -> int:
     for t in trades:
         if isinstance(t, dict):
             trades_to_save.append(_compact_trade_row(t))
+    cash_events_to_save: List[Dict[str, Any]] = []
+    for item in cash_events:
+        if isinstance(item, dict):
+            cash_events_to_save.append(_compact_cash_event_row(item))
     trades_written = _save_trades_payload(trades_to_save, trades_file)
+    cash_events_written = _save_cash_events_payload(cash_events_to_save, cash_events_file)
     persisted_states = _compact_persistent_states(states)
     explicit_out_requested = bool(str(args.out or '').strip())
     write_primary_state = True
@@ -1264,5 +1345,5 @@ def _run_main(args: argparse.Namespace) -> int:
     skipped_cnt = sum((1 for r in results if r.status == 'skipped_missing'))
     err_cnt = sum((1 for r in results if r.status == 'error'))
     state_label = out_written if write_primary_state else f'{out_written} (not written)'
-    print(f'[DONE] wrote {state_label} | trades={trades_written} ({len(trades_to_save)} rows) | imported={imported_cnt}, skipped={skipped_cnt}, errors={err_cnt} | keep_history_rows={keep_history_rows}')
+    print(f'[DONE] wrote {state_label} | trades={trades_written} ({len(trades_to_save)} rows) | cash_events={cash_events_written} ({len(cash_events_to_save)} rows) | imported={imported_cnt}, skipped={skipped_cnt}, errors={err_cnt} | keep_history_rows={keep_history_rows}')
     return 0

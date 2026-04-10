@@ -19,6 +19,8 @@ def _trade_note_sort_key(trade: Dict[str, Any]) -> tuple[str, str, int]:
         str(trade.get("time_tw") or "").strip(),
         trade_id_int,
     )
+
+
 def _open_lots_by_ticker(trades: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     lots_by_ticker: Dict[str, List[Dict[str, Any]]] = {}
     for trade in sorted(trades, key=_trade_note_sort_key):
@@ -133,6 +135,59 @@ def _filter_report_threshold_rows(rows: List[Dict[str, Any]], config: Optional[D
         if _row_has_any_value(row, ("ma_sum_prev", "close_t_minus_5_next", "threshold_from_ma", "threshold")):
             filtered.append(dict(row))
     return filtered
+
+
+def _cash_event_sort_key(event: Dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(event.get("event_date_et") or "").strip(),
+        str(event.get("ts_utc") or "").strip(),
+        str(event.get("event_id") or "").strip(),
+    )
+
+
+def _cash_event_to_activity_row(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    kind = str(event.get("kind") or "").strip().lower()
+    if kind not in {"deposit", "withdrawal"}:
+        return None
+    event_id = str(event.get("event_id") or "").strip()
+    event_date_et = str(event.get("event_date_et") or "").strip()
+    if not event_id or not event_date_et:
+        return None
+    try:
+        amount_usd = float(event.get("amount_usd") or 0.0)
+    except Exception:
+        amount_usd = 0.0
+    return {
+        "trade_id": event_id,
+        "trade_date_et": event_date_et,
+        "ticker": "CASH",
+        "side": "DEPOSIT" if kind == "deposit" else "WITHDRAWAL",
+        "time_tw": None,
+        "cash_amount": amount_usd,
+        "cash_basis": "External Cash Flow",
+        "notes": str(event.get("note") or "").strip(),
+        "source": str(event.get("source") or "").strip(),
+        "activity_type": "cash_event",
+    }
+
+
+def _build_report_activities(trades: List[Dict[str, Any]], cash_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    activities: List[Dict[str, Any]] = []
+    for item in sorted(trades, key=_trade_note_sort_key):
+        if isinstance(item, dict):
+            row = dict(item)
+            row.setdefault("activity_type", "trade")
+            activities.append(row)
+    for item in sorted(cash_events, key=_cash_event_sort_key):
+        if not isinstance(item, dict):
+            continue
+        projected = _cash_event_to_activity_row(item)
+        if projected is not None:
+            activities.append(projected)
+    activities.sort(key=_trade_note_sort_key)
+    return activities
+
+
 def _signal_basis_day(report_meta: Optional[Dict[str, Any]]) -> str:
     if not isinstance(report_meta, dict):
         return ""
@@ -307,6 +362,7 @@ def build_report_root(
     *,
     config: Optional[Dict[str, Any]] = None,
     trades: Optional[List[Dict[str, Any]]] = None,
+    cash_events: Optional[List[Dict[str, Any]]] = None,
     tactical_plan: Optional[TacticalPlan] = None,
     report_meta: Optional[Dict[str, Any]] = None,
     market_history: Optional[Dict[str, Any]] = None,
@@ -340,6 +396,13 @@ def build_report_root(
             if isinstance(item, dict):
                 report_trades.append(dict(item))
         root["trades"] = report_trades
+    report_cash_events: List[Dict[str, Any]] = []
+    if isinstance(cash_events, list):
+        for item in cash_events:
+            if isinstance(item, dict):
+                report_cash_events.append(dict(item))
+        root["cash_events"] = report_cash_events
+    root["activities"] = _build_report_activities(report_trades, report_cash_events)
     if portfolio:
         totals = portfolio.get("totals")
         if isinstance(totals, dict):

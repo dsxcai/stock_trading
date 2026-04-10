@@ -160,6 +160,54 @@ class ReportingSafetyTests(unittest.TestCase):
         self.assertIn("| Ticker | Price (Now) |", markdown)
         self.assertIn("Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the current price.", markdown)
 
+    def test_render_grouped_trade_table_supports_group_footer_rows(self) -> None:
+        schema = {
+            "formatters": {
+                "int": {"type": "integer"},
+                "usd2": {"type": "currency", "currency": "USD", "decimals": 2},
+            }
+        }
+        table_spec = {
+            "column_sets": {
+                "simple": [
+                    {"header": "Trade ID", "value": {"path": "trade_id"}, "format": "int"},
+                    {"header": "Ticker", "value": {"path": "ticker"}},
+                    {"header": "Shares", "value": {"path": "shares"}, "format": "int", "align": "right"},
+                    {"header": "Amount", "value": {"path": "cash_amount"}, "format": "usd2", "align": "right"},
+                ]
+            },
+            "grouping": {
+                "group_by": {"path": "trade_date_et"},
+                "order": "desc",
+                "keep_groups": {"latest_full_groups": 0, "prev_simplified_groups": {"default": 10}},
+            },
+            "group_rendering": {
+                "columns_selector": [
+                    {"when": {"group_index_between": [0, 9]}, "use": "simple"},
+                ]
+            },
+            "group_footer_rows": {
+                "simple": [
+                    {
+                        "label": "Total",
+                        "cells": {
+                            "Shares": {"path": "totals.shares", "format": "int"},
+                            "Amount": {"path": "totals.cash_amount", "format": "usd2"},
+                        },
+                    }
+                ]
+            },
+        }
+        rows = [
+            {"trade_id": 1, "trade_date_et": "2026-03-18", "ticker": "AAA", "shares": 2, "cash_amount": 100.0},
+            {"trade_id": 2, "trade_date_et": "2026-03-18", "ticker": "CASH", "shares": None, "cash_amount": 300.0},
+        ]
+
+        markdown = reporting.render_grouped_trade_table(table_spec, rows, schema, {}, "-")
+
+        self.assertIn("### Trade Date (ET): 2026-03-18", markdown)
+        self.assertIn("| Total | - | 2 | $400.00 |", markdown)
+
     def test_report_spec_sorts_signal_status_by_b_minus_a_desc(self) -> None:
         schema = reporting.load_schema(str(REPO_ROOT / "report_spec.json"))
         states = {
