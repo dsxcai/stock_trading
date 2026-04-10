@@ -817,6 +817,262 @@ class StateEngineModeGateTests(unittest.TestCase):
             },
         )
 
+    def test_migrate_legacy_cash_history_to_events_converts_external_flows(self) -> None:
+        states = {
+            "portfolio": {
+                "cash": {
+                    "external_flows": [
+                        {
+                            "amount_usd": -717.95,
+                            "kind": "withdrawal",
+                            "asof_et": "2026-03-12",
+                            "note": "Cash withdrawal / capital reduction",
+                            "ts_utc": "2026-03-13T02:55:26Z",
+                        },
+                        {
+                            "amount_usd": -7007.51,
+                            "kind": "withdrawal",
+                            "asof_et": "2026-03-17",
+                            "note": "Withdrawal on 3/17",
+                            "ts_utc": "2026-03-17T19:55:22Z",
+                        },
+                    ]
+                }
+            }
+        }
+        cash_events: list[dict] = []
+
+        migrated = state_engine._migrate_legacy_cash_history_to_events(
+            states,
+            cash_events,
+            usd_amount_ndigits=2,
+        )
+
+        self.assertEqual(migrated, 2)
+        self.assertEqual(
+            cash_events,
+            [
+                {
+                    "event_id": "cash-00001",
+                    "event_date_et": "2026-03-12",
+                    "kind": "withdrawal",
+                    "amount_usd": 717.95,
+                    "cash_effect_usd": -717.95,
+                    "bucket_from": "portfolio_cash",
+                    "bucket_to": "external",
+                    "note": "Cash withdrawal / capital reduction",
+                    "source": "legacy_states_migration",
+                    "ts_utc": "2026-03-13T02:55:26Z",
+                },
+                {
+                    "event_id": "cash-00002",
+                    "event_date_et": "2026-03-17",
+                    "kind": "withdrawal",
+                    "amount_usd": 7007.51,
+                    "cash_effect_usd": -7007.51,
+                    "bucket_from": "portfolio_cash",
+                    "bucket_to": "external",
+                    "note": "Withdrawal on 3/17",
+                    "source": "legacy_states_migration",
+                    "ts_utc": "2026-03-17T19:55:22Z",
+                },
+            ],
+        )
+        self.assertEqual(
+            state_engine._net_external_cash_flow_from_events(cash_events, usd_amount_ndigits=2),
+            -7725.46,
+        )
+
+    def test_migrate_legacy_cash_history_to_events_skips_duplicates(self) -> None:
+        states = {
+            "portfolio": {
+                "cash": {
+                    "external_flows": [
+                        {
+                            "amount_usd": -3600.0,
+                            "kind": "withdrawal",
+                            "asof_et": "2026-04-09",
+                            "note": "",
+                            "ts_utc": "2026-04-09T16:20:45Z",
+                        }
+                    ]
+                }
+            }
+        }
+        cash_events = [
+            {
+                "event_id": "cash-00001",
+                "event_date_et": "2026-04-09",
+                "kind": "withdrawal",
+                "amount_usd": 3600.0,
+                "cash_effect_usd": -3600.0,
+                "bucket_from": "portfolio_cash",
+                "bucket_to": "external",
+                "note": "",
+                "source": "update_states",
+                "ts_utc": "2026-04-09T16:20:45Z",
+            }
+        ]
+
+        migrated = state_engine._migrate_legacy_cash_history_to_events(
+            states,
+            cash_events,
+            usd_amount_ndigits=2,
+        )
+
+        self.assertEqual(migrated, 0)
+        self.assertEqual(len(cash_events), 1)
+
+    def test_apply_cash_adjustment_appends_event_and_updates_performance_base(self) -> None:
+        states = {
+            "portfolio": {
+                "cash": {
+                    "usd": 1000.0,
+                    "baseline_usd": 1000.0,
+                },
+                "totals": {
+                    "portfolio": {
+                        "nav_usd": 900.0,
+                    }
+                },
+                "performance": {
+                    "initial_investment_usd": 5000.0,
+                    "baseline": {
+                        "initial_investment_usd": 5000.0,
+                    },
+                },
+            }
+        }
+        cash_events: list[dict] = []
+
+        state_engine._apply_cash_adjustment(
+            states,
+            cash_events,
+            trades=[],
+            amount_usd=-3600.0,
+            usd_amount_ndigits=2,
+            note="wire out",
+            asof_et="2026-04-09",
+        )
+        state_engine._update_portfolio_performance(states, cash_events, usd_amount_ndigits=2)
+
+        self.assertEqual(states["portfolio"]["cash"]["baseline_usd"], -2600.0)
+        self.assertEqual(states["portfolio"]["cash"]["baseline_source"], "manual_cash_adjustment")
+        self.assertEqual(
+            cash_events,
+            [
+                {
+                    "event_id": "cash-00001",
+                    "event_date_et": "2026-04-09",
+                    "kind": "withdrawal",
+                    "amount_usd": 3600.0,
+                    "cash_effect_usd": -3600.0,
+                    "bucket_from": "portfolio_cash",
+                    "bucket_to": "external",
+                    "note": "wire out",
+                    "source": "update_states",
+                    "ts_utc": cash_events[0]["ts_utc"],
+                }
+            ],
+        )
+        perf = states["portfolio"]["performance"]
+        self.assertEqual(perf["net_external_cash_flow_usd"], -3600.0)
+        self.assertEqual(perf["effective_capital_base_usd"], 1400.0)
+        self.assertEqual(perf["profit_usd"], -500.0)
+        self.assertAlmostEqual(perf["profit_rate"], -500.0 / 1400.0, places=8)
+
+    def test_run_main_uses_configured_trade_and_cash_event_paths_when_cli_paths_omitted(self) -> None:
+        args = self._mode_args(force_mode=False)
+        args.mode = ""
+        args.render_report = False
+        args.trades_file = ""
+        args.cash_events_file = ""
+        args.cash_adjust_usd = -10.0
+        args.out = "states.json"
+        loaded_paths: dict[str, str] = {}
+
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch.object(
+                    state_engine,
+                    "_load_json",
+                    return_value={
+                        "portfolio": {
+                            "cash": {"usd": 100.0, "baseline_usd": 100.0},
+                            "positions": [],
+                            "performance": {
+                                "initial_investment_usd": 100.0,
+                                "baseline": {"initial_investment_usd": 100.0},
+                            },
+                        }
+                    },
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    state_engine,
+                    "_load_runtime_config",
+                    return_value={
+                        "meta": {
+                            "trades_file": "ledger/trades_live.json",
+                            "cash_events_file": "ledger/cash_live.json",
+                        },
+                        "reporting": {"numeric_precision": _numeric_precision()},
+                    },
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    state_engine,
+                    "_load_trades_payload",
+                    side_effect=lambda path: loaded_paths.setdefault("load_trades", str(path)) or [],
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    state_engine,
+                    "_load_cash_events_payload",
+                    side_effect=lambda path: loaded_paths.setdefault("load_cash_events", str(path)) or [],
+                )
+            )
+            stack.enter_context(mock.patch.object(state_engine, "_migrate_state_schema"))
+            stack.enter_context(mock.patch.object(state_engine, "_ensure_trading_calendar"))
+            stack.enter_context(mock.patch.object(state_engine, "_ensure_cash_buckets"))
+            stack.enter_context(mock.patch.object(state_engine, "_hydrate_positions_from_trade_ledger_if_needed"))
+            stack.enter_context(mock.patch.object(state_engine, "_discover_tickers_from_config", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_refresh_csv_history_for_mode_updates", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_compute_keep_history_rows", return_value=1))
+            stack.enter_context(mock.patch.object(state_engine, "_import_csvs_into_states", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_late_hydrate_new_position_tickers", return_value=[]))
+            stack.enter_context(mock.patch.object(state_engine, "_rebuild_market_snapshot_from_history"))
+            stack.enter_context(mock.patch.object(state_engine, "_reprice_and_totals"))
+            stack.enter_context(mock.patch.object(state_engine, "_update_tactical_cash_from_trades_and_snapshot"))
+            stack.enter_context(mock.patch.object(state_engine, "_clear_holdings_reconciliation_snapshot"))
+            stack.enter_context(mock.patch.object(state_engine, "_round_selected_numeric_fields"))
+            stack.enter_context(
+                mock.patch.object(
+                    state_engine,
+                    "_save_trades_payload",
+                    side_effect=lambda rows, path: loaded_paths.setdefault("save_trades", str(path)) or str(path),
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    state_engine,
+                    "_save_cash_events_payload",
+                    side_effect=lambda rows, path: loaded_paths.setdefault("save_cash_events", str(path)) or str(path),
+                )
+            )
+            stack.enter_context(mock.patch.object(state_engine, "_save_json", return_value="states.json"))
+
+            exit_code = state_engine._run_main(args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(loaded_paths["load_trades"], "ledger/trades_live.json")
+        self.assertEqual(loaded_paths["load_cash_events"], "ledger/cash_live.json")
+        self.assertEqual(loaded_paths["save_trades"], "ledger/trades_live.json")
+        self.assertEqual(loaded_paths["save_cash_events"], "ledger/cash_live.json")
+
     def test_run_main_mode_only_writes_report_json_and_skips_primary_state_without_explicit_out(self) -> None:
         args = self._mode_args(force_mode=False)
         args.out = ""

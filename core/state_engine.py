@@ -543,6 +543,135 @@ def _strip_legacy_cash_history_fields(states: Dict[str, Any]) -> None:
         cash.pop(key, None)
 
 
+def _cash_event_signature(event: Dict[str, Any], *, usd_amount_ndigits: int) -> tuple:
+    def _rounded(name: str) -> float:
+        try:
+            return round_with_precision(float(event.get(name) or 0.0), usd_amount_ndigits)
+        except Exception:
+            return round_with_precision(0.0, usd_amount_ndigits)
+
+    return (
+        str(event.get('event_date_et') or '').strip(),
+        str(event.get('kind') or '').strip().lower(),
+        _rounded('amount_usd'),
+        _rounded('cash_effect_usd'),
+        str(event.get('bucket_from') or '').strip(),
+        str(event.get('bucket_to') or '').strip(),
+        str(event.get('note') or '').strip(),
+        str(event.get('ts_utc') or '').strip(),
+    )
+
+
+def _legacy_external_flow_to_cash_event(flow: Dict[str, Any], *, usd_amount_ndigits: int) -> Optional[Dict[str, Any]]:
+    if not isinstance(flow, dict):
+        return None
+    event_date_et = str(flow.get('asof_et') or '').strip()
+    if not event_date_et:
+        return None
+    try:
+        raw_amount = round_with_precision(float(flow.get('amount_usd') or 0.0), usd_amount_ndigits)
+    except Exception:
+        return None
+    kind = str(flow.get('kind') or '').strip().lower()
+    if kind not in {'deposit', 'withdrawal'}:
+        kind = 'deposit' if raw_amount >= 0 else 'withdrawal'
+    amount_usd = round_with_precision(abs(raw_amount), usd_amount_ndigits)
+    cash_effect_usd = amount_usd if kind == 'deposit' else round_with_precision(-amount_usd, usd_amount_ndigits)
+    return {
+        'event_date_et': event_date_et,
+        'kind': kind,
+        'amount_usd': amount_usd,
+        'cash_effect_usd': cash_effect_usd,
+        'bucket_from': 'external' if kind == 'deposit' else 'portfolio_cash',
+        'bucket_to': 'portfolio_cash' if kind == 'deposit' else 'external',
+        'note': str(flow.get('note') or '').strip(),
+        'source': 'legacy_states_migration',
+        'ts_utc': str(flow.get('ts_utc') or _cash_event_timestamp_utc()).strip(),
+    }
+
+
+def _legacy_internal_transfer_to_cash_event(flow: Dict[str, Any], *, usd_amount_ndigits: int) -> Optional[Dict[str, Any]]:
+    if not isinstance(flow, dict):
+        return None
+    event_date_et = str(flow.get('asof_et') or '').strip()
+    if not event_date_et:
+        return None
+    try:
+        raw_amount = round_with_precision(float(flow.get('amount_usd') or 0.0), usd_amount_ndigits)
+    except Exception:
+        return None
+    amount_usd = round_with_precision(abs(raw_amount), usd_amount_ndigits)
+    kind_raw = str(flow.get('kind') or '').strip().lower()
+    kind = 'to_reserve' if kind_raw in {'to_reserve', 'reserve'} or raw_amount >= 0 else 'to_deployable'
+    return {
+        'event_date_et': event_date_et,
+        'kind': kind,
+        'amount_usd': amount_usd,
+        'cash_effect_usd': 0.0,
+        'bucket_from': 'deployable' if kind == 'to_reserve' else 'reserve',
+        'bucket_to': 'reserve' if kind == 'to_reserve' else 'deployable',
+        'note': str(flow.get('note') or '').strip(),
+        'source': 'legacy_states_migration',
+        'ts_utc': str(flow.get('ts_utc') or _cash_event_timestamp_utc()).strip(),
+    }
+
+
+def _migrate_legacy_cash_history_to_events(
+    states: Dict[str, Any],
+    cash_events: List[Dict[str, Any]],
+    *,
+    usd_amount_ndigits: int,
+) -> int:
+    cash = ((states.get('portfolio') or {}).get('cash')) or {}
+    if not isinstance(cash, dict):
+        return 0
+    existing_signatures = {
+        _cash_event_signature(item, usd_amount_ndigits=usd_amount_ndigits)
+        for item in cash_events
+        if isinstance(item, dict)
+    }
+    legacy_candidates: List[Dict[str, Any]] = []
+    for flow in cash.get('external_flows') or []:
+        payload = _legacy_external_flow_to_cash_event(flow, usd_amount_ndigits=usd_amount_ndigits)
+        if payload is not None:
+            legacy_candidates.append(payload)
+    for flow in cash.get('internal_transfers') or []:
+        payload = _legacy_internal_transfer_to_cash_event(flow, usd_amount_ndigits=usd_amount_ndigits)
+        if payload is not None:
+            legacy_candidates.append(payload)
+    migrated = 0
+    for payload in sorted(
+        legacy_candidates,
+        key=lambda item: (
+            str(item.get('event_date_et') or '').strip(),
+            str(item.get('ts_utc') or '').strip(),
+            str(item.get('kind') or '').strip(),
+        ),
+    ):
+        signature = _cash_event_signature(payload, usd_amount_ndigits=usd_amount_ndigits)
+        if signature in existing_signatures:
+            continue
+        cash_events.append(
+            CashEventRecord(
+                event_id=_next_cash_event_id(cash_events),
+                event_date_et=str(payload.get('event_date_et') or '').strip(),
+                kind=str(payload.get('kind') or '').strip().lower(),
+                amount_usd=float(payload.get('amount_usd') or 0.0),
+                cash_effect_usd=float(payload.get('cash_effect_usd') or 0.0),
+                bucket_from=str(payload.get('bucket_from') or '').strip(),
+                bucket_to=str(payload.get('bucket_to') or '').strip(),
+                note=str(payload.get('note') or '').strip(),
+                source=str(payload.get('source') or '').strip(),
+                ts_utc=str(payload.get('ts_utc') or '').strip(),
+            ).as_dict()
+        )
+        existing_signatures.add(signature)
+        migrated += 1
+    if migrated:
+        print(f'[MIGRATE] migrated {migrated} legacy cash history event(s) into cash_events.')
+    return migrated
+
+
 def _cash_event_timestamp_utc() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
@@ -1062,6 +1191,11 @@ def _run_main(args: argparse.Namespace) -> int:
     _migrate_state_schema(states)
     _ensure_trading_calendar(runtime)
     _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+    _migrate_legacy_cash_history_to_events(
+        states,
+        cash_events,
+        usd_amount_ndigits=int(numeric_precision["usd_amount"]),
+    )
     _strip_legacy_cash_history_fields(states)
     _hydrate_positions_from_trade_ledger_if_needed(states, runtime, trades)
     mode_label = str(args.mode or '').strip()

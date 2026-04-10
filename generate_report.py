@@ -18,6 +18,7 @@ from core.state_engine import (
     _ensure_cash_buckets,
     _hydrate_positions_from_trade_ledger_if_needed,
     _import_csvs_into_states,
+    _migrate_legacy_cash_history_to_events,
     _rebuild_market_snapshot_from_history,
     _reprice_and_totals,
     _update_portfolio_performance,
@@ -81,6 +82,11 @@ def run_args(args: argparse.Namespace, *, argv: list[str] | None = None) -> int:
         _migrate_state_schema(states, ensure_broker_snapshot=True)
         _ensure_trading_calendar(engine_runtime)
         _ensure_cash_buckets(states, usd_amount_ndigits=int(numeric_precision["usd_amount"]))
+        _migrate_legacy_cash_history_to_events(
+            states,
+            cash_events,
+            usd_amount_ndigits=int(numeric_precision["usd_amount"]),
+        )
         _hydrate_positions_from_trade_ledger_if_needed(states, engine_runtime, trades)
         report_now_et = None
         now_et_raw = str(args.now_et or "").strip()
