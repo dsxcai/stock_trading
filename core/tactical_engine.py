@@ -12,7 +12,7 @@ from core.strategy import (
     _normalize_ma_rule,
     _parse_indicator_window,
 )
-from utils.config_access import config_fee_rate, config_tactical_indicators
+from utils.config_access import config_buy_fee_rate, config_sell_fee_rate, config_tactical_indicators
 from utils.precision import round_with_precision, state_engine_numeric_precision
 
 
@@ -31,6 +31,21 @@ def _buy_sizing_price_usd(action_price_usd: Any, fee_rate: Any) -> Optional[floa
     return price * (1.0 + applied_fee_rate)
 
 
+def _sell_reclaim_price_usd(action_price_usd: Any, fee_rate: Any) -> Optional[float]:
+    """Convert a quoted sell price into the effective per-share cash reclaim after fees."""
+    try:
+        price = float(action_price_usd)
+    except Exception:
+        return None
+    if price <= 0:
+        return None
+    try:
+        applied_fee_rate = max(float(fee_rate or 0.0), 0.0)
+    except Exception:
+        applied_fee_rate = 0.0
+    return price * max(1.0 - applied_fee_rate, 0.0)
+
+
 def compute_tactical_plan(
     states: Dict[str, Any],
     runtime: Dict[str, Any],
@@ -45,7 +60,8 @@ def compute_tactical_plan(
 
     config = runtime_support._runtime_config(runtime)
     numeric_precision = state_engine_numeric_precision(config)
-    fee_rate = max(float(config_fee_rate(config) or 0.0), 0.0)
+    buy_fee_rate = max(float(config_buy_fee_rate(config) or 0.0), 0.0)
+    sell_fee_rate = max(float(config_sell_fee_rate(config) or 0.0), 0.0)
     tactical_indicators = config_tactical_indicators(config) or {
         "GOOG": "SMA50",
         "SMH": "SMA100",
@@ -105,7 +121,8 @@ def compute_tactical_plan(
         )
         buy_signal = bool(ma_ok and close_t_minus_5_ok)
         action_price_usd = runtime_support._lookup_action_price_usd(states, runtime, ticker)
-        buy_sizing_price_usd = _buy_sizing_price_usd(action_price_usd, fee_rate)
+        buy_sizing_price_usd = _buy_sizing_price_usd(action_price_usd, buy_fee_rate)
+        sell_reclaim_price_usd = _sell_reclaim_price_usd(action_price_usd, sell_fee_rate)
         sell_signal = bool((not buy_signal) and (shares_pre > 0))
         row = {
             "ticker": ticker,
@@ -128,9 +145,9 @@ def compute_tactical_plan(
         if buy_signal and buy_sizing_price_usd is not None and ticker not in buy_candidate_seen:
             buy_candidates.append({"ticker": ticker, "price_usd": buy_sizing_price_usd})
             buy_candidate_seen.add(ticker)
-        if sell_signal and action_price_usd is not None and action_price_usd > 0:
+        if sell_signal and sell_reclaim_price_usd is not None and sell_reclaim_price_usd > 0:
             sell_candidates.append(
-                {"ticker": ticker, "price_usd": float(action_price_usd), "shares_pre": shares_pre}
+                {"ticker": ticker, "price_usd": float(sell_reclaim_price_usd), "shares_pre": shares_pre}
             )
 
     investable_cash_base_usd = _estimate_tactical_buy_budget_usd(states)
@@ -149,7 +166,7 @@ def compute_tactical_plan(
         sell_signal = bool(row.get("sell_signal"))
         shares_pre = int(row["tactical_shares_pre"] or 0)
         action_price_usd = row.get("action_price_usd")
-        buy_sizing_price_usd = _buy_sizing_price_usd(action_price_usd, fee_rate)
+        buy_sizing_price_usd = _buy_sizing_price_usd(action_price_usd, buy_fee_rate)
         if sell_signal:
             action = "SELL_ALL"
             action_shares = shares_pre

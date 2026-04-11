@@ -186,7 +186,8 @@ class GuiServicesTests(unittest.TestCase):
                     "doc": "Daily Investment Report",
                     "trades_file": "ledger/trades.json",
                     "cash_events_file": "ledger/cash_events.json",
-                    "fee_rate": "0.0015",
+                    "buy_fee_rate": "0.0015",
+                    "sell_fee_rate": "0.0025",
                     "core_tickers": "SPY, ARKQ",
                     "tactical_tickers": "QQQ\nSMH",
                     "tactical_cash_pool_ticker": "META",
@@ -215,7 +216,8 @@ class GuiServicesTests(unittest.TestCase):
             self.assertEqual(state_engine["meta"]["doc"], "Daily Investment Report")
             self.assertEqual(state_engine["meta"]["trades_file"], "ledger/trades.json")
             self.assertEqual(state_engine["meta"]["cash_events_file"], "ledger/cash_events.json")
-            self.assertEqual(state_engine["execution"]["fee_rate"], 0.0015)
+            self.assertEqual(state_engine["execution"]["buy_fee_rate"], 0.0015)
+            self.assertEqual(state_engine["execution"]["sell_fee_rate"], 0.0025)
             self.assertEqual(state_engine["portfolio"]["buckets"]["core"]["tickers"], ["SPY", "ARKQ"])
             self.assertEqual(state_engine["portfolio"]["buckets"]["tactical"]["tickers"], ["QQQ", "SMH"])
             self.assertEqual(state_engine["portfolio"]["buckets"]["tactical"]["cash_pool_ticker"], "META")
@@ -399,6 +401,7 @@ class GuiServerTests(unittest.TestCase):
             self.assertIn("Cash Adjustment", rendered)
             self.assertIn('name="cash_adjust_usd"', rendered)
             self.assertIn('name="cash_adjust_note"', rendered)
+            self.assertIn('id="allow_incomplete_report"', rendered)
             self.assertNotIn('id="allow_incomplete_cash_adjust"', rendered)
             self.assertNotIn("<h2>Signal Config</h2>", rendered)
             self.assertIn('data-async-submit="1"', rendered)
@@ -430,7 +433,8 @@ class GuiServerTests(unittest.TestCase):
             self.assertIn('name="doc"', rendered)
             self.assertIn('name="trades_file"', rendered)
             self.assertIn('name="cash_events_file"', rendered)
-            self.assertIn('name="fee_rate"', rendered)
+            self.assertIn('name="buy_fee_rate"', rendered)
+            self.assertIn('name="sell_fee_rate"', rendered)
             self.assertIn('name="core_tickers"', rendered)
             self.assertIn('name="tactical_tickers"', rendered)
             self.assertIn('name="tactical_cash_pool_ticker"', rendered)
@@ -453,6 +457,20 @@ class GuiServerTests(unittest.TestCase):
             self.assertIn("YYYY-MM-DD=Reason", rendered)
             self.assertIn("YYYY-MM-DD=HH:MM|Reason", rendered)
             self.assertIn("alias=ticker", rendered)
+            self.assertNotIn('id="allow_incomplete_runtime_config"', rendered)
+            self.assertNotIn('id="allow_incomplete_config"', rendered)
+            ordered_sections = [
+                "General",
+                "Ledger Paths",
+                "Execution Costs",
+                "Portfolio Buckets",
+                "Market Data",
+                "Trading Calendar",
+                "Reporting",
+                "Signal Config",
+            ]
+            section_positions = [rendered.index(label) for label in ordered_sections]
+            self.assertEqual(section_positions, sorted(section_positions))
 
     def test_render_page_auto_selects_latest_report_when_none_selected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

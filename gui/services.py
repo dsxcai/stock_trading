@@ -78,7 +78,8 @@ class RuntimeConfigSnapshot:
     doc: str
     trades_file: str
     cash_events_file: str
-    fee_rate: float
+    buy_fee_rate: float
+    sell_fee_rate: float
     core_tickers_text: str
     tactical_tickers_text: str
     tactical_cash_pool_ticker: str
@@ -405,7 +406,8 @@ class GuiServices:
             doc=str(meta.get("doc") or "").strip(),
             trades_file=str(meta.get("trades_file") or "trades.json").strip() or "trades.json",
             cash_events_file=str(meta.get("cash_events_file") or "cash_events.json").strip() or "cash_events.json",
-            fee_rate=float(execution.get("fee_rate") or 0.0),
+            buy_fee_rate=float(execution.get("buy_fee_rate") or 0.0),
+            sell_fee_rate=float(execution.get("sell_fee_rate") or 0.0),
             core_tickers_text=_format_lines([str(value or "").upper().strip() for value in core_bucket.get("tickers") or []]),
             tactical_tickers_text=_format_lines(
                 [str(value or "").upper().strip() for value in tactical_bucket.get("tickers") or []]
@@ -445,7 +447,6 @@ class GuiServices:
         config_fields: Dict[str, Any],
         *,
         selected_report_path: str = "",
-        allow_incomplete_csv_rows: bool = False,
     ) -> OperationResult:
         raw = load_json_object(str(self.config_path))
         state_engine = raw.get("state_engine") if isinstance(raw.get("state_engine"), dict) else {}
@@ -456,11 +457,16 @@ class GuiServices:
         doc = str(config_fields.get("doc") or "").strip()
         trades_file = str(config_fields.get("trades_file") or "trades.json").strip() or "trades.json"
         cash_events_file = str(config_fields.get("cash_events_file") or "cash_events.json").strip() or "cash_events.json"
-        fee_rate_raw = str(config_fields.get("fee_rate") or "").strip()
+        buy_fee_rate_raw = str(config_fields.get("buy_fee_rate") or "").strip()
+        sell_fee_rate_raw = str(config_fields.get("sell_fee_rate") or "").strip()
         try:
-            fee_rate = float(fee_rate_raw or 0.0)
+            buy_fee_rate = float(buy_fee_rate_raw or 0.0)
         except Exception as exc:
-            raise ValueError("fee_rate must be a number") from exc
+            raise ValueError("buy_fee_rate must be a number") from exc
+        try:
+            sell_fee_rate = float(sell_fee_rate_raw or 0.0)
+        except Exception as exc:
+            raise ValueError("sell_fee_rate must be a number") from exc
         core_tickers = _parse_ticker_list(str(config_fields.get("core_tickers") or ""))
         tactical_tickers = _parse_ticker_list(str(config_fields.get("tactical_tickers") or ""))
         tactical_cash_pool_ticker = str(config_fields.get("tactical_cash_pool_ticker") or "").upper().strip()
@@ -505,7 +511,8 @@ class GuiServices:
                 "cash_events_file": cash_events_file,
             },
             "execution": {
-                "fee_rate": fee_rate,
+                "buy_fee_rate": buy_fee_rate,
+                "sell_fee_rate": sell_fee_rate,
             },
             "portfolio": {
                 "buckets": {
@@ -548,7 +555,6 @@ class GuiServices:
         )
         refreshed = self.refresh_selected_report(
             selected_report_path,
-            allow_incomplete_csv_rows=allow_incomplete_csv_rows,
         )
         if refreshed is None:
             return result
@@ -567,7 +573,6 @@ class GuiServices:
         selected_windows: Dict[str, int],
         *,
         selected_report_path: str = "",
-        allow_incomplete_csv_rows: bool = False,
     ) -> OperationResult:
         normalized: Dict[str, int] = {}
         for ticker, window in selected_windows.items():
@@ -599,7 +604,6 @@ class GuiServices:
         )
         refreshed = self.refresh_selected_report(
             selected_report_path,
-            allow_incomplete_csv_rows=allow_incomplete_csv_rows,
         )
         if refreshed is None:
             return result

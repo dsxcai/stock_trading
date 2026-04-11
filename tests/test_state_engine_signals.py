@@ -28,7 +28,13 @@ def _numeric_precision() -> dict:
     }
 
 
-def _signal_config(tactical_indicators: dict, *, fee_rate: float | None = None) -> dict:
+def _signal_config(
+    tactical_indicators: dict,
+    *,
+    fee_rate: float | None = None,
+    buy_fee_rate: float | None = None,
+    sell_fee_rate: float | None = None,
+) -> dict:
     config = {
         "strategy": {
             "tactical": {
@@ -40,7 +46,17 @@ def _signal_config(tactical_indicators: dict, *, fee_rate: float | None = None) 
         },
     }
     if fee_rate is not None:
-        config["execution"] = {"fee_rate": float(fee_rate)}
+        if buy_fee_rate is None:
+            buy_fee_rate = float(fee_rate)
+        if sell_fee_rate is None:
+            sell_fee_rate = float(fee_rate)
+    if buy_fee_rate is not None or sell_fee_rate is not None:
+        execution = {}
+        if buy_fee_rate is not None:
+            execution["buy_fee_rate"] = float(buy_fee_rate)
+        if sell_fee_rate is not None:
+            execution["sell_fee_rate"] = float(sell_fee_rate)
+        config["execution"] = execution
     return config
 
 
@@ -95,7 +111,7 @@ class StateEngineSignalTests(unittest.TestCase):
 
     def test_buy_budget_includes_estimated_sell_reclaim(self) -> None:
         states = {
-            "config": _signal_config({"AAA": "SMA50", "BBB": "SMA50"}, fee_rate=0.002),
+            "config": _signal_config({"AAA": "SMA50", "BBB": "SMA50"}, buy_fee_rate=0.002, sell_fee_rate=0.01),
             "market": {
                 "asof_t_et": "2026-03-17",
                 "prices_now": {"AAA": 100.0, "BBB": 50.0},
@@ -131,15 +147,15 @@ class StateEngineSignalTests(unittest.TestCase):
         self.assertEqual(sell_row.get("t_plus_1_action"), "SELL_ALL")
         self.assertEqual(int(sell_row.get("action_shares") or 0), 10)
         self.assertEqual(float(buy_row.get("investable_cash_base_usd") or 0.0), 0.0)
-        self.assertEqual(float(buy_row.get("estimated_sell_reclaim_usd") or 0.0), 1000.0)
-        self.assertEqual(float(buy_row.get("investable_cash_usd") or 0.0), 1000.0)
+        self.assertEqual(float(buy_row.get("estimated_sell_reclaim_usd") or 0.0), 990.0)
+        self.assertEqual(float(buy_row.get("investable_cash_usd") or 0.0), 990.0)
         self.assertEqual(buy_row.get("t_plus_1_action"), "BUY")
         self.assertEqual(int(buy_row.get("action_shares") or 0), 19)
         self.assertEqual(float(buy_row.get("action_cash_amount_usd") or 0.0), 951.9)
 
     def test_buy_more_share_sizing_uses_fee_adjusted_close(self) -> None:
         states = {
-            "config": _signal_config({"AAA": "SMA50"}, fee_rate=0.002),
+            "config": _signal_config({"AAA": "SMA50"}, buy_fee_rate=0.002, sell_fee_rate=0.02),
             "market": {
                 "asof_t_et": "2026-03-17",
                 "prices_now": {"AAA": 50.0},
@@ -173,7 +189,7 @@ class StateEngineSignalTests(unittest.TestCase):
 
     def test_buy_signal_without_budget_still_renders_buy_zero(self) -> None:
         states = {
-            "config": _signal_config({"AAA": "SMA50"}, fee_rate=0.002),
+            "config": _signal_config({"AAA": "SMA50"}, buy_fee_rate=0.002, sell_fee_rate=0.02),
             "market": {
                 "asof_t_et": "2026-03-17",
                 "prices_now": {"AAA": 50.0},
