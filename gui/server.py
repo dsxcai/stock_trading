@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import cgi
 import html
+import ipaddress
 import io
 import re
 import shutil
@@ -10,17 +11,41 @@ import threading
 import time
 import webbrowser
 from dataclasses import dataclass
+from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from gui.config_view import render_config_panel
 from gui.markdown import render_markdown
 from gui.services import GuiServices, OperationResult, RuntimeConfigSnapshot, SignalConfigSnapshot
 
 _LOG_HIGHLIGHT_RE = re.compile(r"^\[(?:ERR|ERROR|EXCEPTION|ABORT)\]\s*|^Traceback\b|(?:^|\b)[A-Za-z_]*?(?:Error|Exception):", re.IGNORECASE)
+GUI_SESSION_QUERY_PARAM = "__gui_token"
+GUI_SESSION_COOKIE_NAME = "__stock_trading_gui_session"
+
+
+def _is_loopback_address(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if text.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(text.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
+def normalize_gui_host(host: str) -> str:
+    value = str(host or "").strip() or "127.0.0.1"
+    if value in {"0.0.0.0", "::"}:
+        return "127.0.0.1"
+    if _is_loopback_address(value):
+        return "127.0.0.1" if value.lower() == "localhost" else value
+    raise ValueError("GUI only supports loopback hosts. Use 127.0.0.1 or localhost.")
 
 
 @dataclass
@@ -32,8 +57,9 @@ class GuiState:
 
 
 class GuiApplication:
-    def __init__(self, repo_root: Path) -> None:
+    def __init__(self, repo_root: Path, session_token: str) -> None:
         self.services = GuiServices(repo_root)
+        self.session_token = str(session_token or "").strip()
         self.state = GuiState()
         self._lock = threading.RLock()
 
@@ -741,6 +767,12 @@ class GuiApplication:
 </body>
 <script>
   (() => {{
+    const currentUrl = new URL(window.location.href);
+    if (currentUrl.searchParams.has("{GUI_SESSION_QUERY_PARAM}")) {{
+      currentUrl.searchParams.delete("{GUI_SESSION_QUERY_PARAM}");
+      const cleanUrl = `${{currentUrl.pathname}}${{currentUrl.search}}${{currentUrl.hash}}`;
+      window.history.replaceState(null, "", cleanUrl || "/");
+    }}
     const overlay = document.getElementById("busy_overlay");
     const busyMessage = document.getElementById("busy_message");
     const liveStatus = document.getElementById("live_status");
@@ -1082,6 +1114,12 @@ class GuiHTTPServer(ThreadingHTTPServer):
         super().__init__(server_address, RequestHandlerClass)
         self.control_action = "shutdown"
 
+    def verify_request(self, request, client_address) -> bool:
+        try:
+            return _is_loopback_address(client_address[0])
+        except Exception:
+            return False
+
 
 def make_handler(app: GuiApplication):
     class GuiHandler(BaseHTTPRequestHandler):
@@ -1089,6 +1127,9 @@ def make_handler(app: GuiApplication):
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
+            if not self._is_authorized_request(parsed):
+                self.send_error(HTTPStatus.FORBIDDEN, "Forbidden")
+                return
             if parsed.path == "/healthz":
                 return self._send_text("ok\n")
             if parsed.path != "/":
@@ -1103,6 +1144,9 @@ def make_handler(app: GuiApplication):
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
+            if not self._is_authorized_request(parsed):
+                self.send_error(HTTPStatus.FORBIDDEN, "Forbidden")
+                return
             fields, uploads = self._parse_form_data()
             try:
                 if parsed.path == "/select-report":
@@ -1241,6 +1285,7 @@ def make_handler(app: GuiApplication):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
+            self._send_session_cookie()
             self.end_headers()
             self.wfile.write(payload)
 
@@ -1249,12 +1294,14 @@ def make_handler(app: GuiApplication):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
+            self._send_session_cookie()
             self.end_headers()
             self.wfile.write(payload)
 
         def _redirect_home(self) -> None:
             self.send_response(HTTPStatus.SEE_OTHER)
             self.send_header("Location", "/")
+            self._send_session_cookie()
             self.end_headers()
 
         def _send_server_control_page(self, server_action: str) -> None:
@@ -1361,6 +1408,32 @@ def make_handler(app: GuiApplication):
 
             threading.Thread(target=_shutdown, daemon=True).start()
 
+        def _is_authorized_request(self, parsed) -> bool:
+            expected_token = str(app.session_token or "").strip()
+            if not expected_token:
+                return False
+            cookie_header = str(self.headers.get("Cookie") or "")
+            if cookie_header:
+                try:
+                    cookie = SimpleCookie()
+                    cookie.load(cookie_header)
+                    morsel = cookie.get(GUI_SESSION_COOKIE_NAME)
+                    if morsel is not None and str(morsel.value or "") == expected_token:
+                        return True
+                except Exception:
+                    pass
+            params = parse_qs(parsed.query or "", keep_blank_values=True)
+            return str((params.get(GUI_SESSION_QUERY_PARAM) or [""])[-1] or "") == expected_token
+
+        def _send_session_cookie(self) -> None:
+            token = str(app.session_token or "").strip()
+            if not token:
+                return
+            self.send_header(
+                "Set-Cookie",
+                f"{GUI_SESSION_COOKIE_NAME}={token}; HttpOnly; Path=/; SameSite=Strict",
+            )
+
         def _parse_form_data(self) -> Tuple[Dict[str, str], Dict[str, cgi.FieldStorage]]:
             content_type = self.headers.get("Content-Type", "")
             mime_type, _ = cgi.parse_header(content_type)
@@ -1402,15 +1475,16 @@ def make_handler(app: GuiApplication):
     return GuiHandler
 
 
-def run_server(repo_root: Path, host: str, port: int, *, open_browser: bool = False) -> str:
-    app = GuiApplication(repo_root)
+def run_server(repo_root: Path, host: str, port: int, *, open_browser: bool = False, session_token: str = "") -> str:
+    host = normalize_gui_host(host)
+    app = GuiApplication(repo_root, session_token=session_token)
     handler = make_handler(app)
     with GuiHTTPServer((host, port), handler) as server:
         url = f"http://{host}:{port}/"
-        print(f"[GUI] serving {url}")
+        open_url = f"{url}?{urlencode({GUI_SESSION_QUERY_PARAM: app.session_token})}" if app.session_token else url
         if open_browser:
             try:
-                webbrowser.open(url)
+                webbrowser.open(open_url)
             except Exception:
                 pass
         server.serve_forever()

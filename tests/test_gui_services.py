@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -350,6 +351,32 @@ class GuiServicesTests(unittest.TestCase):
             self.assertEqual(commands[1][commands[1].index("--trades-file") + 1], "ledger/trades_live.json")
             self.assertEqual(commands[1][commands[1].index("--cash-events-file") + 1], "ledger/cash_live.json")
 
+    def test_run_command_uses_subprocess_in_repo_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_base_repo(root)
+            services = GuiServices(root)
+            completed = subprocess.CompletedProcess(
+                args=[sys.executable, "generate_report.py"],
+                returncode=0,
+                stdout="[OK] wrote report/2026-03-31_premarket.json\n[OK] wrote report/2026-03-31_premarket.md\n",
+            )
+
+            with mock.patch("gui.services.subprocess.run", return_value=completed) as mocked_run:
+                result = services._run_command([sys.executable, "generate_report.py", "--mode", "premarket"], name="Generate report")
+
+            mocked_run.assert_called_once_with(
+                [sys.executable, "generate_report.py", "--mode", "premarket"],
+                cwd=root.resolve(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+            self.assertTrue(result.success)
+            self.assertEqual(result.report_path, "report/2026-03-31_premarket.md")
+            self.assertEqual(result.report_json_path, "report/2026-03-31_premarket.json")
+
 
 class GuiServerTests(unittest.TestCase):
     def _write_base_repo(self, root: Path) -> None:
@@ -360,7 +387,7 @@ class GuiServerTests(unittest.TestCase):
             root = Path(tmp)
             self._write_base_repo(root)
 
-            app = GuiApplication(root)
+            app = GuiApplication(root, session_token="test-session")
             app.set_right_tab("status")
             app.set_last_result(
                 OperationResult(
@@ -382,7 +409,7 @@ class GuiServerTests(unittest.TestCase):
             report_path = root / "report" / "2026-03-31_premarket.md"
             report_path.write_text("# Daily Report\n", encoding="utf-8")
 
-            app = GuiApplication(root)
+            app = GuiApplication(root, session_token="test-session")
             app.set_selected_report(str(report_path))
 
             rendered = app.render_page()
@@ -422,7 +449,7 @@ class GuiServerTests(unittest.TestCase):
             root = Path(tmp)
             self._write_base_repo(root)
 
-            app = GuiApplication(root)
+            app = GuiApplication(root, session_token="test-session")
             app.set_right_tab("config")
 
             rendered = app.render_page()
@@ -483,7 +510,7 @@ class GuiServerTests(unittest.TestCase):
             os.utime(older, (1, 1))
             os.utime(newer, (2, 2))
 
-            app = GuiApplication(root)
+            app = GuiApplication(root, session_token="test-session")
 
             rendered = app.render_page()
 
@@ -497,7 +524,7 @@ class GuiServerTests(unittest.TestCase):
             report_path = root / "report" / "2026-03-31_premarket.md"
             report_path.write_text("# Daily Report\n\n- hello\n", encoding="utf-8")
 
-            app = GuiApplication(root)
+            app = GuiApplication(root, session_token="test-session")
             app.set_selected_report(str(report_path))
             app.set_view_mode("raw")
 
@@ -510,7 +537,7 @@ class GuiServerTests(unittest.TestCase):
             root = Path(tmp)
             self._write_base_repo(root)
 
-            app = GuiApplication(root)
+            app = GuiApplication(root, session_token="test-session")
             app.set_last_result(
                 OperationResult(
                     name="Import trades",
@@ -533,9 +560,15 @@ class GuiAppTests(unittest.TestCase):
     def test_build_client_url_uses_loopback_for_wildcard_host(self) -> None:
         self.assertEqual(gui_app._build_client_url("0.0.0.0", 8765), "http://127.0.0.1:8765/")
 
+    def test_build_authenticated_client_url_embeds_session_token(self) -> None:
+        self.assertEqual(
+            gui_app._build_authenticated_client_url("127.0.0.1", 8765, "secret"),
+            "http://127.0.0.1:8765/?__gui_token=secret",
+        )
+
     def test_main_uses_desktop_mode_by_default(self) -> None:
         with mock.patch.object(sys, "argv", ["gui_app.py"]):
-            with mock.patch.object(gui_app, "run_desktop_app") as mocked_desktop:
+            with mock.patch.object(gui_app, "run_desktop_app", return_value="shutdown") as mocked_desktop:
                 with mock.patch.object(gui_app, "run_browser_app") as mocked_browser:
                     exit_code = gui_app.main()
 
@@ -543,17 +576,39 @@ class GuiAppTests(unittest.TestCase):
         mocked_desktop.assert_called_once()
         mocked_browser.assert_not_called()
 
-    def test_main_restarts_server_when_requested_in_browser_mode(self) -> None:
+    def test_main_reexecs_current_process_when_restart_requested_in_browser_mode(self) -> None:
         with mock.patch.object(sys, "argv", ["gui_app.py", "--open-browser"]):
-            with mock.patch.object(gui_app, "run_server", side_effect=["restart", "shutdown"]) as mocked:
-                exit_code = gui_app.main()
+            with mock.patch.object(gui_app, "run_browser_app", return_value="restart") as mocked_browser:
+                with mock.patch.object(gui_app, "_restart_current_process") as mocked_restart:
+                    exit_code = gui_app.main()
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(mocked.call_count, 2)
-        first_kwargs = mocked.call_args_list[0].kwargs
-        second_kwargs = mocked.call_args_list[1].kwargs
-        self.assertTrue(first_kwargs["open_browser"])
-        self.assertFalse(second_kwargs["open_browser"])
+        mocked_browser.assert_called_once()
+        self.assertTrue(mocked_browser.call_args.kwargs["open_browser"])
+        self.assertIn("session_token", mocked_browser.call_args.kwargs)
+        mocked_restart.assert_called_once()
+
+    def test_main_does_not_reopen_browser_after_process_restart(self) -> None:
+        with mock.patch.object(sys, "argv", ["gui_app.py", "--open-browser"]):
+            with mock.patch.dict(os.environ, {gui_app._RESTARTED_ENV_VAR: "1"}, clear=False):
+                with mock.patch.object(gui_app, "run_browser_app", return_value="shutdown") as mocked_browser:
+                    exit_code = gui_app.main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_browser.assert_called_once()
+        self.assertFalse(mocked_browser.call_args.kwargs["open_browser"])
+
+    def test_main_reexecs_current_process_when_restart_requested_in_desktop_mode(self) -> None:
+        with mock.patch.object(sys, "argv", ["gui_app.py"]):
+            with mock.patch.object(gui_app, "run_desktop_app", return_value="restart") as mocked_desktop:
+                with mock.patch.object(gui_app, "_restart_current_process") as mocked_restart:
+                    exit_code = gui_app.main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_desktop.assert_called_once()
+        self.assertEqual(len(mocked_desktop.call_args.args), 4)
+        self.assertTrue(str(mocked_desktop.call_args.args[3] or "").strip())
+        mocked_restart.assert_called_once()
 
     def test_main_reports_missing_pywebview(self) -> None:
         with mock.patch.object(sys, "argv", ["gui_app.py"]):
@@ -564,6 +619,15 @@ class GuiAppTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertIn("pywebview missing", stderr.getvalue())
+
+    def test_main_rejects_non_loopback_host(self) -> None:
+        with mock.patch.object(sys, "argv", ["gui_app.py", "--host", "192.168.1.20"]):
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr):
+                exit_code = gui_app.main()
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("loopback hosts", stderr.getvalue())
 
 
 if __name__ == "__main__":

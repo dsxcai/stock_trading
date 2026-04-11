@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-import io
 import json
-import os
 import re
 import shlex
+import subprocess
 import sys
-from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import generate_report
-import update_states
-from extensions import capital_xls_import
 from utils.config_access import discover_state_engine_tickers, load_json_object, load_state_engine_config
 
 
@@ -791,16 +786,15 @@ class GuiServices:
         return match.group("date"), match.group("mode").lower()
 
     def _run_command(self, command: List[str], *, name: str) -> OperationResult:
-        entrypoint, argv = self._resolve_entrypoint(command)
-        stream = io.StringIO()
-        previous_cwd = Path.cwd()
-        try:
-            os.chdir(self.repo_root)
-            with redirect_stdout(stream), redirect_stderr(stream):
-                returncode = int(entrypoint(argv) or 0)
-        finally:
-            os.chdir(previous_cwd)
-        stdout = stream.getvalue()
+        completed = subprocess.run(
+            command,
+            cwd=self.repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        stdout = str(completed.stdout or "")
         log_path = self._parse_log_path(stdout)
         report_path = ""
         report_json_path = ""
@@ -809,12 +803,13 @@ class GuiServices:
                 report_path = written
             elif written.endswith(".json"):
                 report_json_path = written
-        success = int(returncode or 0) == 0
+        returncode = int(completed.returncode or 0)
+        success = returncode == 0
         message = self._success_message(name, report_path) if success else self._failure_message(stdout, returncode)
         return OperationResult(
             name=name,
             success=success,
-            returncode=int(returncode or 0),
+            returncode=returncode,
             command=shlex.join(command),
             stdout=stdout,
             message=message,
@@ -822,16 +817,6 @@ class GuiServices:
             report_path=report_path,
             report_json_path=report_json_path,
         )
-
-    @staticmethod
-    def _resolve_entrypoint(command: List[str]) -> Tuple[Callable[[List[str] | None], int], List[str]]:
-        if len(command) >= 2 and command[0] == sys.executable and command[1] == "update_states.py":
-            return update_states.main, command[2:]
-        if len(command) >= 2 and command[0] == sys.executable and command[1] == "generate_report.py":
-            return generate_report.main, command[2:]
-        if len(command) >= 3 and command[0] == sys.executable and command[1:3] == ["-m", "extensions.capital_xls_import"]:
-            return capital_xls_import.main, command[3:]
-        raise ValueError(f"unsupported GUI command: {shlex.join(command)}")
 
     @staticmethod
     def _window_from_spec(spec: object) -> int:

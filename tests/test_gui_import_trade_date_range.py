@@ -54,7 +54,7 @@ class GuiImportTradeDateRangeTests(unittest.TestCase):
             report_path = root / "report" / "2026-03-31_premarket.md"
             report_path.write_text("# Daily Report\n", encoding="utf-8")
 
-            app = GuiApplication(root)
+            app = GuiApplication(root, session_token="test-session")
             app.set_selected_report(str(report_path))
 
             rendered = app.render_page()
