@@ -51,7 +51,7 @@ The main screen currently supports the following:
 - edit all current live runtime settings in `config.json` through a structured `Config` tab, including buckets, FX pairs, trading calendar entries, numeric precision, render policy, and tactical indicators
 - select recent markdown reports and switch between rendered markdown and raw markdown
 - inspect the latest operation status and highlighted error output
-- restart or stop the local GUI server from the GUI itself
+- reload or close the local GUI from the GUI itself
 
 ### 1.3 Main screen layout
 
@@ -62,7 +62,47 @@ The GUI is split into two areas:
 
 The `Report` tab renders the selected markdown report directly in the GUI. The `Status` tab shows the latest operation result, including the report path, log path, exit code, and captured log output. If an operation fails, error lines are highlighted in red. The `Config` tab exposes structured forms for the current runtime configuration instead of requiring direct JSON editing.
 
-### 1.4 Current GUI limitations
+<p>
+  <img src="docs/images/gui-overview.png" alt="GUI overview showing the left-side operation panels and the report viewer on the right" width="980">
+</p>
+
+The screenshot above shows the normal working layout:
+
+- the left column is where you run the daily workflow, generate ad hoc reports, import broker trades, adjust cash, and switch recent reports
+- the right viewer is where you read the selected report, inspect operation status, or edit runtime configuration from the `Config` tab
+
+### 1.4 Config tab
+
+The `Config` tab is intended to replace direct `config.json` editing for routine changes. It keeps the same canonical settings layout, but exposes it as grouped forms so the commonly adjusted parameters can be changed safely from the GUI.
+
+<p>
+  <img src="docs/images/gui-config.png" alt="GUI Config tab showing Runtime Config sections such as ledger paths, execution costs, portfolio buckets, and trading calendar settings" width="980">
+</p>
+
+The `Config` tab currently covers:
+
+- document metadata and ledger paths
+- buy-side and sell-side execution fee rates
+- bucket defaults for core, tactical, and tactical cash-pool tickers
+- FX aliases and per-ticker CSV overrides
+- trading-calendar closures and early closes
+- numeric precision and trade-render policy
+- tactical indicator selection in the `Signal Config` section
+
+### 1.5 Reload and close the GUI
+
+The GUI also exposes app controls directly in the upper-left card:
+
+<p>
+  <img src="docs/images/gui-server-controls.png" alt="GUI control card with Reload and Close buttons" width="420">
+</p>
+
+Use them as follows:
+
+- `Reload`: restart the full local GUI process and reconnect the current app session. Use this after code changes when you want the GUI to pick up the latest Python and view code without manually re-running `python3 gui_app.py`.
+- `Close`: exit the local GUI process completely. In desktop mode, this closes the current GUI window. In browser mode, this ends the current GUI session until you start it again from the terminal.
+
+### 1.6 Current GUI limitations
 
 The current GUI is intentionally focused on routine workflows. A few tasks are still better handled from the CLI:
 
@@ -71,7 +111,7 @@ The current GUI is intentionally focused on routine workflows. A few tasks are s
 - broker reconciliation arguments such as `--broker-investment-total-usd` are still CLI-first
 - the GUI operates on the same local `config.json`, `states.json`, `trades.json`, `data/`, and `report/` files as the CLI
 
-### 1.5 Recommended daily usage flow
+### 1.7 Recommended daily usage flow
 
 For routine use, the intended order is:
 

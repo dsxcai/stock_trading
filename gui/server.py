@@ -646,12 +646,12 @@ class GuiApplication:
           <h1>Stock Trading GUI</h1>
           <div class="subtle">Run daily workflows, inspect reports, edit tactical SMA settings, and surface logs without using the command line.</div>
         </div>
-        <form class="stack" method="post" action="/server-control" data-busy-message="Handling server control, please wait...">
+        <form class="stack" method="post" action="/server-control" data-busy-message="Handling GUI control, please wait...">
           <div class="ops-grid two">
-            <button class="ghost" type="submit" name="server_action" value="restart" data-busy-label="restart-server">Restart Server</button>
-            <button class="danger" type="submit" name="server_action" value="shutdown" data-busy-label="shutdown-server">Stop Server</button>
+            <button class="ghost" type="submit" name="server_action" value="restart" data-busy-label="reload-gui">Reload</button>
+            <button class="danger" type="submit" name="server_action" value="shutdown" data-busy-label="close-gui">Close</button>
           </div>
-          <div class="form-note">Restart keeps the same host and port. Stop exits the current local GUI process.</div>
+          <div class="form-note">Reload reconnects the current GUI with the latest local code. Close exits the current local GUI process.</div>
         </form>
       </section>
       <section class="card stack">
@@ -930,7 +930,7 @@ class GuiApplication:
         }} else if (form.getAttribute("action") === "/select-report") {{
           message = "Loading " + label + ", please wait...";
         }} else if (form.getAttribute("action") === "/server-control") {{
-          message = label === "shutdown-server" ? "Stopping the server, please wait..." : "Restarting the server, please wait...";
+          message = label === "close-gui" ? "Closing the GUI, please wait..." : "Reloading the GUI, please wait...";
         }}
       }}
       document.body.classList.add("is-busy");
@@ -1306,9 +1306,9 @@ def make_handler(app: GuiApplication):
 
         def _send_server_control_page(self, server_action: str) -> None:
             if server_action == "restart":
-                title = "Restarting Server"
-                heading = "Restarting server"
-                detail = "The GUI server is restarting. This tab will reconnect automatically."
+                title = "Reloading GUI"
+                heading = "Reloading GUI"
+                detail = "The local GUI is reloading. This tab will reconnect automatically."
                 script = """
 <script>
   (() => {
@@ -1325,15 +1325,15 @@ def make_handler(app: GuiApplication):
     window.setInterval(tryReconnect, 700);
     window.setTimeout(tryReconnect, 900);
     if (status) {
-      status.textContent = "Waiting for server to come back...";
+      status.textContent = "Waiting for the GUI to reconnect...";
     }
   })();
 </script>
 """
             else:
-                title = "Server Stopped"
-                heading = "Server stopped"
-                detail = "The local GUI process has been stopped. You can close this tab or start the server again from the terminal."
+                title = "GUI Closed"
+                heading = "GUI closed"
+                detail = "The local GUI process has exited. You can close this tab or start the GUI again from the terminal."
                 script = ""
             body = f"""<!doctype html>
 <html lang="en">
@@ -1390,7 +1390,7 @@ def make_handler(app: GuiApplication):
   <section class="card">
     <h1>{html.escape(heading)}</h1>
     <div class="subtle">{html.escape(detail)}</div>
-    <div id="status_text" class="subtle">{'Preparing reconnect…' if server_action == 'restart' else 'The current session has ended.'}</div>
+    <div id="status_text" class="subtle">{'Preparing reload…' if server_action == 'restart' else 'The current session has ended.'}</div>
     <div><a href="/">Return to GUI</a></div>
   </section>
   {script}
