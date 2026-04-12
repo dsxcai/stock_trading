@@ -536,6 +536,9 @@ class GuiServices:
                 },
             },
         }
+        gui_settings = state_engine.get("gui") if isinstance(state_engine.get("gui"), dict) else None
+        if gui_settings:
+            canonical_state_engine["gui"] = gui_settings
         self.config_path.write_text(
             json.dumps({"state_engine": canonical_state_engine}, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

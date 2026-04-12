@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import os
 import secrets
 import sys
@@ -17,10 +18,116 @@ from gui.server import GUI_SESSION_QUERY_PARAM, normalize_gui_host, run_server
 WINDOW_TITLE = "Stock Trading GUI"
 WINDOW_WIDTH = 1440
 WINDOW_HEIGHT = 960
+_WINDOW_GEOMETRY_MIN_WIDTH = 200
+_WINDOW_GEOMETRY_MIN_HEIGHT = 100
 SERVER_START_TIMEOUT_SECONDS = 10.0
 SERVER_POLL_INTERVAL_SECONDS = 0.1
 _RESTARTED_ENV_VAR = "STOCK_TRADING_GUI_RESTARTED"
 _SESSION_TOKEN_ENV_VAR = "STOCK_TRADING_GUI_SESSION_TOKEN"
+
+
+def _config_path(repo_root: Path) -> Path:
+    return Path(repo_root).resolve() / "config.json"
+
+
+def _load_window_geometry(config_path: Path) -> dict[str, int | None]:
+    default = {
+        "width": WINDOW_WIDTH,
+        "height": WINDOW_HEIGHT,
+        "x": None,
+        "y": None,
+    }
+    try:
+        raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except Exception:
+        return dict(default)
+    state_engine = raw.get("state_engine") if isinstance(raw, dict) else {}
+    gui = state_engine.get("gui") if isinstance(state_engine, dict) else {}
+    window = gui.get("window") if isinstance(gui, dict) else {}
+    if not isinstance(window, dict):
+        return dict(default)
+
+    def _parse_int(value: object, *, minimum: int | None = None) -> int | None:
+        if value is None or value == "":
+            return None
+        try:
+            parsed = int(value)
+        except Exception:
+            return None
+        if minimum is not None and parsed < minimum:
+            return None
+        return parsed
+
+    width = _parse_int(window.get("width"), minimum=_WINDOW_GEOMETRY_MIN_WIDTH) or WINDOW_WIDTH
+    height = _parse_int(window.get("height"), minimum=_WINDOW_GEOMETRY_MIN_HEIGHT) or WINDOW_HEIGHT
+    x = _parse_int(window.get("x"))
+    y = _parse_int(window.get("y"))
+    return {
+        "width": width,
+        "height": height,
+        "x": x,
+        "y": y,
+    }
+
+
+def _save_window_geometry(config_path: Path, *, width: int, height: int, x: int | None, y: int | None) -> None:
+    path = Path(config_path)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raw = {}
+    except Exception:
+        raw = {}
+    state_engine = raw.get("state_engine")
+    if not isinstance(state_engine, dict):
+        state_engine = {}
+        raw["state_engine"] = state_engine
+    gui = state_engine.get("gui")
+    if not isinstance(gui, dict):
+        gui = {}
+        state_engine["gui"] = gui
+    gui["window"] = {
+        "width": int(width),
+        "height": int(height),
+        "x": None if x is None else int(x),
+        "y": None if y is None else int(y),
+    }
+    path.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+class _WindowGeometryAutosaver:
+    def __init__(self, config_path: Path, *, debounce_seconds: float = 0.35) -> None:
+        self.config_path = Path(config_path)
+        self.debounce_seconds = float(debounce_seconds)
+        self._lock = threading.Lock()
+        self._timer: threading.Timer | None = None
+
+    def schedule(self, window, *args, **kwargs) -> None:
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+            self._timer = threading.Timer(self.debounce_seconds, self._persist, args=(window,))
+            self._timer.daemon = True
+            self._timer.start()
+
+    def flush(self, window, *args, **kwargs) -> None:
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+        self._persist(window)
+
+    def _persist(self, window) -> None:
+        try:
+            _save_window_geometry(
+                self.config_path,
+                width=int(window.width),
+                height=int(window.height),
+                x=int(window.x) if window.x is not None else None,
+                y=int(window.y) if window.y is not None else None,
+            )
+        except Exception:
+            return
 
 
 class ServerLoopThread(threading.Thread):
@@ -175,6 +282,7 @@ def run_desktop_app(repo_root: Path, host: str, port: int, session_token: str) -
     webview = _load_webview_module()
     client_url = _build_client_url(host, port)
     authenticated_url = _build_authenticated_client_url(host, port, session_token)
+    geometry = _load_window_geometry(_config_path(repo_root))
     server_thread = ServerLoopThread(repo_root, host, port, session_token)
     server_thread.start()
     try:
@@ -182,9 +290,15 @@ def run_desktop_app(repo_root: Path, host: str, port: int, session_token: str) -
         window = webview.create_window(
             WINDOW_TITLE,
             url=authenticated_url,
-            width=WINDOW_WIDTH,
-            height=WINDOW_HEIGHT,
+            width=int(geometry["width"] or WINDOW_WIDTH),
+            height=int(geometry["height"] or WINDOW_HEIGHT),
+            x=geometry["x"],
+            y=geometry["y"],
         )
+        autosaver = _WindowGeometryAutosaver(_config_path(repo_root))
+        window.events.moved += autosaver.schedule
+        window.events.resized += autosaver.schedule
+        window.events.closing += autosaver.flush
 
         def _monitor_server() -> None:
             _watch_server(window, server_thread)

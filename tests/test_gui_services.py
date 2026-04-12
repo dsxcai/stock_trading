@@ -180,6 +180,12 @@ class GuiServicesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._write_base_repo(root)
+            config_path = root / "config.json"
+            existing = json.loads(config_path.read_text(encoding="utf-8"))
+            existing.setdefault("state_engine", {})["gui"] = {
+                "window": {"width": 1200, "height": 780, "x": 30, "y": 50}
+            }
+            config_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             services = GuiServices(root)
 
             result = services.save_runtime_config(
@@ -238,6 +244,10 @@ class GuiServicesTests(unittest.TestCase):
             self.assertEqual(
                 state_engine["reporting"]["trade_render_policy"]["keep_prev_trade_days_simplified"],
                 7,
+            )
+            self.assertEqual(
+                state_engine["gui"]["window"],
+                {"width": 1200, "height": 780, "x": 30, "y": 50},
             )
 
     def test_run_import_trades_uses_module_entrypoint_and_replace_default(self) -> None:
@@ -564,6 +574,126 @@ class GuiAppTests(unittest.TestCase):
         self.assertEqual(
             gui_app._build_authenticated_client_url("127.0.0.1", 8765, "secret"),
             "http://127.0.0.1:8765/?__gui_token=secret",
+        )
+
+    def test_load_window_geometry_uses_defaults_when_config_has_no_gui_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps({"state_engine": {}}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            geometry = gui_app._load_window_geometry(config_path)
+
+        self.assertEqual(
+            geometry,
+            {"width": gui_app.WINDOW_WIDTH, "height": gui_app.WINDOW_HEIGHT, "x": None, "y": None},
+        )
+
+    def test_save_window_geometry_writes_to_config_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps({"state_engine": {}}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            gui_app._save_window_geometry(config_path, width=1280, height=820, x=44, y=66)
+
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            saved["state_engine"]["gui"]["window"],
+            {"width": 1280, "height": 820, "x": 44, "y": 66},
+        )
+
+    def test_run_desktop_app_restores_and_persists_window_geometry(self) -> None:
+        class FakeEvent:
+            def __init__(self) -> None:
+                self.handlers = []
+
+            def __iadd__(self, callback):
+                self.handlers.append(callback)
+                return self
+
+        class FakeEvents:
+            def __init__(self) -> None:
+                self.moved = FakeEvent()
+                self.resized = FakeEvent()
+                self.closing = FakeEvent()
+
+        class FakeWindow:
+            def __init__(self) -> None:
+                self.width = 1350
+                self.height = 840
+                self.x = 75
+                self.y = 95
+                self.events = FakeEvents()
+
+            def destroy(self) -> None:
+                return None
+
+        class FakeWebview:
+            def __init__(self, window) -> None:
+                self.window = window
+                self.create_window = mock.Mock(return_value=window)
+                self.start = mock.Mock()
+
+        class FakeServerThread:
+            def __init__(self, repo_root, host, port, session_token) -> None:
+                self.repo_root = repo_root
+                self.host = host
+                self.port = port
+                self.session_token = session_token
+                self.error = None
+                self.final_action = "shutdown"
+
+            def start(self) -> None:
+                return None
+
+            def is_alive(self) -> bool:
+                return False
+
+            def join(self, timeout=None) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "state_engine": {
+                            "gui": {
+                                "window": {"width": 1100, "height": 720, "x": 12, "y": 18}
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            window = FakeWindow()
+            fake_webview = FakeWebview(window)
+
+            with mock.patch.object(gui_app, "_load_webview_module", return_value=fake_webview):
+                with mock.patch.object(gui_app, "ServerLoopThread", FakeServerThread):
+                    with mock.patch.object(gui_app, "_wait_for_server"):
+                        with mock.patch.object(gui_app, "_request_server_shutdown"):
+                            action = gui_app.run_desktop_app(root, "127.0.0.1", 8765, "session-token")
+
+            self.assertEqual(action, "shutdown")
+            fake_webview.create_window.assert_called_once()
+            self.assertEqual(fake_webview.create_window.call_args.kwargs["width"], 1100)
+            self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 720)
+            self.assertEqual(fake_webview.create_window.call_args.kwargs["x"], 12)
+            self.assertEqual(fake_webview.create_window.call_args.kwargs["y"], 18)
+            for callback in window.events.closing.handlers:
+                callback(window)
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            saved["state_engine"]["gui"]["window"],
+            {"width": 1350, "height": 840, "x": 75, "y": 95},
         )
 
     def test_main_uses_desktop_mode_by_default(self) -> None:
