@@ -615,9 +615,10 @@ class GuiServices:
         refreshed.message = f"Config saved, but refreshing the selected report failed: {refreshed.message}"
         return refreshed
 
-    def run_daily_mode(
+    def run_report(
         self,
         mode_label: str,
+        report_date: str = "",
         *,
         force_mode: bool = False,
         allow_incomplete_csv_rows: bool = False,
@@ -625,6 +626,15 @@ class GuiServices:
         mode_key = self._normalize_mode_key(mode_label)
         if mode_key not in _MODE_LABELS:
             raise ValueError(f"unsupported mode: {mode_label}")
+        report_date_value = str(report_date or "").strip()
+        if report_date_value:
+            if mode_key == "intraday":
+                raise ValueError("Intraday is only meaningful for the latest trading session and is not supported for a specified historical trade date")
+            command = self._generate_report_command(mode_key, "--out-dir", "report")
+            command.extend(["--date", report_date_value])
+            if allow_incomplete_csv_rows:
+                command.append("--allow-incomplete-csv-rows")
+            return self._run_command(command, name=f"Generate {_MODE_LABELS[mode_key]} report")
         command = [
             sys.executable,
             "update_states.py",
@@ -651,6 +661,20 @@ class GuiServices:
             command.append("--allow-incomplete-csv-rows")
         return self._run_command(command, name=f"{_MODE_LABELS[mode_key]} run")
 
+    def run_daily_mode(
+        self,
+        mode_label: str,
+        *,
+        force_mode: bool = False,
+        allow_incomplete_csv_rows: bool = False,
+    ) -> OperationResult:
+        return self.run_report(
+            mode_label,
+            "",
+            force_mode=force_mode,
+            allow_incomplete_csv_rows=allow_incomplete_csv_rows,
+        )
+
     def run_generate_report(
         self,
         mode_label: str,
@@ -658,16 +682,11 @@ class GuiServices:
         *,
         allow_incomplete_csv_rows: bool = False,
     ) -> OperationResult:
-        mode_key = self._normalize_mode_key(mode_label)
-        if mode_key not in _MODE_LABELS:
-            raise ValueError(f"unsupported mode: {mode_label}")
-        command = self._generate_report_command(mode_key, "--out-dir", "report")
-        report_date_value = str(report_date or "").strip()
-        if report_date_value:
-            command.extend(["--date", report_date_value])
-        if allow_incomplete_csv_rows:
-            command.append("--allow-incomplete-csv-rows")
-        return self._run_command(command, name=f"Generate {_MODE_LABELS[mode_key]} report")
+        return self.run_report(
+            mode_label,
+            report_date,
+            allow_incomplete_csv_rows=allow_incomplete_csv_rows,
+        )
 
     def run_import_trades(
         self,

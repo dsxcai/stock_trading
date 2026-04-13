@@ -15,14 +15,10 @@ import type {
 type TabKey = "report" | "status" | "config";
 type ViewMode = "rendered" | "raw";
 
-type DailyFormState = {
+type ReportFormState = {
+  date_mode: "latest" | "selected";
   allow_incomplete_csv_rows: boolean;
   force_mode: boolean;
-  mode: string;
-};
-
-type ReportFormState = {
-  allow_incomplete_csv_rows: boolean;
   mode: string;
   report_date: string;
 };
@@ -90,7 +86,7 @@ const PROGRESS_PROFILES: ProgressProfile[] = [
   },
   {
     estimateMs: 6500,
-    match: (message) => message.toLowerCase().includes("generating report"),
+    match: (message) => message.toLowerCase().includes("generating") && message.toLowerCase().includes("report"),
     phases: [
       { pct: 10, text: "Preparing report context..." },
       { pct: 42, text: "Rendering markdown..." },
@@ -201,13 +197,10 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("rendered");
   const [busyMessage, setBusyMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [dailyForm, setDailyForm] = useState<DailyFormState>({
+  const [reportForm, setReportForm] = useState<ReportFormState>({
+    date_mode: "latest",
     allow_incomplete_csv_rows: false,
     force_mode: false,
-    mode: "premarket",
-  });
-  const [reportForm, setReportForm] = useState<ReportFormState>({
-    allow_incomplete_csv_rows: false,
     mode: "premarket",
     report_date: "",
   });
@@ -266,13 +259,21 @@ export default function App() {
       return;
     }
     const defaultMode = dashboard.modes[0]?.key ?? "premarket";
-    setDailyForm((current) => ({ ...current, mode: current.mode || defaultMode }));
     setReportForm((current) => ({ ...current, mode: current.mode || defaultMode }));
     setRuntimeForm(snapshotToRuntimeForm(dashboard.runtime_config));
     setSignalRows(buildSignalRows(dashboard.signal_config));
     setCustomSignalTickers("");
     setCustomSignalWindow("50");
   }, [dashboard]);
+
+  useEffect(() => {
+    if (reportForm.date_mode === "selected" && reportForm.mode === "intraday") {
+      setReportForm((current) => ({
+        ...current,
+        mode: "premarket",
+      }));
+    }
+  }, [reportForm.date_mode, reportForm.mode]);
 
   useEffect(() => {
     if (!busyMessage) {
@@ -369,17 +370,6 @@ export default function App() {
     );
   }
 
-  async function handleDeleteReport(reportPath: string) {
-    if (!window.confirm("Delete this report and its matching JSON artifact?")) {
-      return;
-    }
-    await runAction(
-      "Deleting report artifacts...",
-      () => apiClient!.invokeAction("delete-report", { report_path: reportPath }),
-      "report",
-    );
-  }
-
   function toggleReportSelection(reportPath: string, checked: boolean) {
     setSelectedReports((current) => {
       const next = new Set(current);
@@ -434,19 +424,15 @@ export default function App() {
     }
   }
 
-  async function handleDailyRun(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await runAction(
-      `Running ${dailyForm.mode} workflow...`,
-      () => apiClient!.invokeAction("run-mode", dailyForm),
-      "report",
-    );
-  }
-
   async function handleGenerateReport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (reportForm.date_mode === "selected" && !reportForm.report_date.trim()) {
+      setErrorMessage("Choose a historical trading day before generating a historical report.");
+      return;
+    }
+    const actionLabel = reportForm.date_mode === "selected" ? "Generating historical report..." : "Generating latest report...";
     await runAction(
-      "Generating report...",
+      actionLabel,
       () => apiClient!.invokeAction("generate-report", reportForm),
       "report",
     );
@@ -555,6 +541,10 @@ export default function App() {
   const currentResult = dashboard.last_result;
   const allReportsSelected =
     dashboard.recent_reports.length > 0 && selectedReports.size === dashboard.recent_reports.length;
+  const availableReportModes =
+    reportForm.date_mode === "selected"
+      ? dashboard.modes.filter((mode) => mode.key !== "intraday")
+      : dashboard.modes;
   const renderReport =
     viewMode === "raw" ? (
       <pre className="report-raw">{dashboard.report.text || "No report selected."}</pre>
@@ -593,60 +583,61 @@ export default function App() {
 
           <section className="rail-panel">
             <div className="section-head">
-              <h2>Daily Run</h2>
-              <p>Execute `Premarket`, `Intraday`, or `AfterClose` without the CLI.</p>
-            </div>
-            <form className="stack" onSubmit={handleDailyRun}>
-              <label>
-                Mode
-                <select
-                  value={dailyForm.mode}
-                  onChange={(event) =>
-                    setDailyForm((current) => ({ ...current, mode: event.target.value }))
-                  }
-                >
-                  {dashboard.modes.map((mode) => (
-                    <option key={mode.key} value={mode.key}>
-                      {mode.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={dailyForm.force_mode}
-                  onChange={(event) =>
-                    setDailyForm((current) => ({ ...current, force_mode: event.target.checked }))
-                  }
-                />
-                <span>Allow force mode</span>
-              </label>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={dailyForm.allow_incomplete_csv_rows}
-                  onChange={(event) =>
-                    setDailyForm((current) => ({
-                      ...current,
-                      allow_incomplete_csv_rows: event.target.checked,
-                    }))
-                  }
-                />
-                <span>Allow incomplete CSV rows</span>
-              </label>
-              <button type="submit" disabled={!!busyMessage}>
-                Run Daily Workflow
-              </button>
-            </form>
-          </section>
-
-          <section className="rail-panel">
-            <div className="section-head">
               <h2>Generate Report</h2>
-              <p>Write a markdown report for a specific mode and optional report date.</p>
+              <p>Generate the latest session report or a report for a specified historical trading day.</p>
             </div>
             <form className="stack" onSubmit={handleGenerateReport}>
+              <div>
+                <div>Report Basis</div>
+                <div className="basis-options">
+                  <label className="basis-option">
+                    <input
+                      type="radio"
+                      name="report-basis"
+                      value="latest"
+                      checked={reportForm.date_mode === "latest"}
+                      onChange={(event) =>
+                        setReportForm((current) => ({
+                          ...current,
+                          date_mode: event.target.value as "latest" | "selected",
+                          force_mode: current.force_mode,
+                          report_date: "",
+                        }))
+                      }
+                    />
+                    <span>Latest trading session</span>
+                  </label>
+                  <label className="basis-option">
+                    <input
+                      type="radio"
+                      name="report-basis"
+                      value="selected"
+                      checked={reportForm.date_mode === "selected"}
+                      onChange={(event) =>
+                        setReportForm((current) => ({
+                          ...current,
+                          date_mode: event.target.value as "latest" | "selected",
+                          force_mode: false,
+                          report_date: current.report_date,
+                        }))
+                      }
+                    />
+                    <span>Specified historical trading day</span>
+                  </label>
+                </div>
+              </div>
+              {reportForm.date_mode === "selected" ? (
+                <label>
+                  Trading Day
+                  <input
+                    type="date"
+                    value={reportForm.report_date}
+                    onChange={(event) =>
+                      setReportForm((current) => ({ ...current, report_date: event.target.value }))
+                    }
+                  />
+                </label>
+              ) : null}
               <label>
                 Mode
                 <select
@@ -655,23 +646,25 @@ export default function App() {
                     setReportForm((current) => ({ ...current, mode: event.target.value }))
                   }
                 >
-                  {dashboard.modes.map((mode) => (
+                  {availableReportModes.map((mode) => (
                     <option key={mode.key} value={mode.key}>
                       {mode.label}
                     </option>
                   ))}
                 </select>
               </label>
-              <label>
-                Report Date
-                <input
-                  type="date"
-                  value={reportForm.report_date}
-                  onChange={(event) =>
-                    setReportForm((current) => ({ ...current, report_date: event.target.value }))
-                  }
-                />
-              </label>
+              {reportForm.date_mode === "latest" ? (
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={reportForm.force_mode}
+                    onChange={(event) =>
+                      setReportForm((current) => ({ ...current, force_mode: event.target.checked }))
+                    }
+                  />
+                  <span>Allow force mode</span>
+                </label>
+              ) : null}
               <label className="checkbox-row">
                 <input
                   type="checkbox"

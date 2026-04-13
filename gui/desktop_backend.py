@@ -103,16 +103,18 @@ class GuiDesktopBackend:
             session_state.last_result = self.services.delete_all_reports()
             return session_state
         if action_key == "run-mode":
-            result = self.services.run_daily_mode(
+            result = self.services.run_report(
                 str(payload.get("mode") or ""),
+                str(payload.get("report_date") or ""),
                 force_mode=self._coerce_bool(payload.get("force_mode")),
                 allow_incomplete_csv_rows=self._coerce_bool(payload.get("allow_incomplete_csv_rows")),
             )
             return self._merge_operation_result(session_state, result)
         if action_key == "generate-report":
-            result = self.services.run_generate_report(
+            result = self.services.run_report(
                 str(payload.get("mode") or ""),
                 str(payload.get("report_date") or ""),
+                force_mode=self._coerce_bool(payload.get("force_mode")),
                 allow_incomplete_csv_rows=self._coerce_bool(payload.get("allow_incomplete_csv_rows")),
             )
             return self._merge_operation_result(session_state, result)

@@ -281,6 +281,55 @@ class GuiServicesTests(unittest.TestCase):
             self.assertEqual(commands[1][commands[1].index("--trades-file") + 1], "ledger/trades_live.json")
             self.assertEqual(commands[1][commands[1].index("--cash-events-file") + 1], "ledger/cash_live.json")
 
+    def test_run_report_uses_update_states_for_latest_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_base_repo(root)
+            services = GuiServices(root)
+            captured = {}
+
+            def fake_run_command(command, *, name):
+                captured["command"] = list(command)
+                captured["name"] = name
+                return OperationResult(name=name, success=True, returncode=0, command=" ".join(command), stdout="", message="ok")
+
+            with mock.patch.object(services, "_run_command", side_effect=fake_run_command):
+                services.run_report("premarket", "", force_mode=True, allow_incomplete_csv_rows=True)
+
+            self.assertEqual(captured["command"][1], "update_states.py")
+            self.assertIn("--force-mode", captured["command"])
+            self.assertIn("--allow-incomplete-csv-rows", captured["command"])
+            self.assertIn("--render-report", captured["command"])
+
+    def test_run_report_uses_generate_report_for_historical_date(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_base_repo(root)
+            services = GuiServices(root)
+            captured = {}
+
+            def fake_run_command(command, *, name):
+                captured["command"] = list(command)
+                captured["name"] = name
+                return OperationResult(name=name, success=True, returncode=0, command=" ".join(command), stdout="", message="ok")
+
+            with mock.patch.object(services, "_run_command", side_effect=fake_run_command):
+                services.run_report("afterclose", "2026-03-31", allow_incomplete_csv_rows=True)
+
+            self.assertEqual(captured["command"][1], "generate_report.py")
+            self.assertIn("--date", captured["command"])
+            self.assertEqual(captured["command"][captured["command"].index("--date") + 1], "2026-03-31")
+            self.assertIn("--allow-incomplete-csv-rows", captured["command"])
+
+    def test_run_report_rejects_intraday_for_historical_date(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_base_repo(root)
+            services = GuiServices(root)
+
+            with self.assertRaisesRegex(ValueError, "Intraday"):
+                services.run_report("intraday", "2026-03-31")
+
 
 class GuiBackendStateTests(unittest.TestCase):
     def _write_base_repo(self, root: Path) -> None:
@@ -368,7 +417,7 @@ class GuiBackendStateTests(unittest.TestCase):
                 report_json_path=str(report_path.with_suffix(".json")),
             )
 
-            with mock.patch.object(backend.services, "run_daily_mode", return_value=fake_result):
+            with mock.patch.object(backend.services, "run_report", return_value=fake_result):
                 session_state = backend.perform_action(
                     "run-mode",
                     {"mode": "premarket", "force_mode": True, "allow_incomplete_csv_rows": False},
@@ -376,6 +425,39 @@ class GuiBackendStateTests(unittest.TestCase):
 
             self.assertEqual(session_state.selected_report_path, str(report_path))
             self.assertEqual(session_state.last_result.message, "completed")
+
+    def test_perform_action_generate_report_uses_unified_report_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_base_repo(root)
+            backend = GuiDesktopBackend(root)
+            report_path = root / "report" / "2026-03-31_afterclose.md"
+
+            fake_result = OperationResult(
+                name="Generate AfterClose report",
+                success=True,
+                returncode=0,
+                command="python generate_report.py",
+                stdout="ok",
+                message="generated",
+                report_path=str(report_path),
+                report_json_path=str(report_path.with_suffix(".json")),
+            )
+
+            with mock.patch.object(backend.services, "run_report", return_value=fake_result) as mocked_run:
+                session_state = backend.perform_action(
+                    "generate-report",
+                    {"mode": "afterclose", "report_date": "2026-03-31", "allow_incomplete_csv_rows": False},
+                )
+
+            mocked_run.assert_called_once_with(
+                "afterclose",
+                "2026-03-31",
+                force_mode=False,
+                allow_incomplete_csv_rows=False,
+            )
+            self.assertEqual(session_state.selected_report_path, str(report_path))
+            self.assertEqual(session_state.last_result.message, "generated")
 
     def test_serialize_and_deserialize_operation_result_roundtrip(self) -> None:
         result = OperationResult(
