@@ -24,7 +24,6 @@ type ReportFormState = {
 };
 
 type ImportFormState = {
-  allow_incomplete_csv_rows: boolean;
   capital_xls_path: string;
   trade_date_from: string;
   trade_date_to: string;
@@ -205,7 +204,6 @@ export default function App() {
     report_date: "",
   });
   const [importForm, setImportForm] = useState<ImportFormState>({
-    allow_incomplete_csv_rows: false,
     capital_xls_path: "",
     trade_date_from: "",
     trade_date_to: "",
@@ -752,19 +750,6 @@ export default function App() {
                   />
                 </label>
               </div>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={importForm.allow_incomplete_csv_rows}
-                  onChange={(event) =>
-                    setImportForm((current) => ({
-                      ...current,
-                      allow_incomplete_csv_rows: event.target.checked,
-                    }))
-                  }
-                />
-                <span>Allow incomplete CSV rows</span>
-              </label>
               <button type="submit" disabled={!!busyMessage}>
                 Import Trades
               </button>
@@ -782,6 +767,7 @@ export default function App() {
                 <input
                   type="number"
                   step="0.01"
+                  placeholder="-100 = withdraw, 100 = deposit"
                   value={cashAdjustmentForm.cash_adjust_usd}
                   onChange={(event) =>
                     setCashAdjustmentForm((current) => ({
@@ -793,7 +779,8 @@ export default function App() {
               </label>
               <label>
                 Note
-                <textarea
+                <input
+                  type="text"
                   value={cashAdjustmentForm.cash_adjust_note}
                   onChange={(event) =>
                     setCashAdjustmentForm((current) => ({

@@ -30,6 +30,7 @@ const REPO_ROOT = path.resolve(DESKTOP_ROOT, "..");
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 const RENDERER_INDEX_PATH = path.join(DESKTOP_ROOT, "dist", "index.html");
 const PYTHON_BRIDGE_PATH = path.join(REPO_ROOT, "gui_ipc.py");
+const CONFIG_PATH = path.join(REPO_ROOT, "config.json");
 
 let mainWindow: BrowserWindow | null = null;
 let reloadTimer: NodeJS.Timeout | null = null;
@@ -146,11 +147,43 @@ async function invokeDesktopAction(action: string, payload: Record<string, unkno
   return response;
 }
 
+function getWindowBounds(): Electron.Rectangle | null {
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+      const cfg = JSON.parse(raw);
+      const guiWin = cfg?.state_engine?.gui?.window;
+      if (guiWin && typeof guiWin.width === "number" && typeof guiWin.height === "number") {
+        return guiWin as Electron.Rectangle;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to read window bounds from config.json", e);
+  }
+  return null;
+}
+
+function saveWindowBounds(bounds: Electron.Rectangle) {
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+      const cfg = JSON.parse(raw);
+      if (!cfg.state_engine) cfg.state_engine = {};
+      if (!cfg.state_engine.gui) cfg.state_engine.gui = {};
+      cfg.state_engine.gui.window = bounds;
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
+    }
+  } catch (e) {
+    console.error("Failed to save window bounds to config.json", e);
+  }
+}
+
 async function createMainWindow(): Promise<void> {
-  const window = new BrowserWindow({
+  const bounds = getWindowBounds();
+  const windowOptions: Electron.BrowserWindowConstructorOptions = {
     title: WINDOW_TITLE,
-    width: DEFAULT_WIDTH,
-    height: DEFAULT_HEIGHT,
+    width: bounds?.width ?? DEFAULT_WIDTH,
+    height: bounds?.height ?? DEFAULT_HEIGHT,
     minWidth: 1180,
     minHeight: 760,
     backgroundColor: "#f3ecdf",
@@ -160,9 +193,21 @@ async function createMainWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  };
+
+  if (bounds?.x !== undefined && bounds?.y !== undefined) {
+    windowOptions.x = bounds.x;
+    windowOptions.y = bounds.y;
+  }
+
+  const window = new BrowserWindow(windowOptions);
 
   mainWindow = window;
+  window.on("close", () => {
+    if (!window.isFullScreen() && !window.isMaximized()) {
+      saveWindowBounds(window.getBounds());
+    }
+  });
   window.on("closed", () => {
     if (mainWindow === window) {
       mainWindow = null;
