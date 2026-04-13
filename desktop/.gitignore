@@ -1,0 +1,11 @@
+# Logs
+logs
+*.log
+
+# Dependencies and Build files
+node_modules/
+dist/
+dist-electron/
+
+# Local environment files
+*.local

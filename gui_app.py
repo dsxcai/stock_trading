@@ -1,347 +1,149 @@
 from __future__ import annotations
 
 import argparse
-import importlib
-import json
 import os
-import secrets
+import shutil
+import subprocess
 import sys
-import threading
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
-
-from gui.server import GUI_SESSION_QUERY_PARAM, normalize_gui_host, run_server
-
-WINDOW_TITLE = "Stock Trading GUI"
-WINDOW_WIDTH = 1440
-WINDOW_HEIGHT = 960
-_WINDOW_GEOMETRY_MIN_WIDTH = 200
-_WINDOW_GEOMETRY_MIN_HEIGHT = 100
-SERVER_START_TIMEOUT_SECONDS = 10.0
-SERVER_POLL_INTERVAL_SECONDS = 0.1
-_RESTARTED_ENV_VAR = "STOCK_TRADING_GUI_RESTARTED"
-_SESSION_TOKEN_ENV_VAR = "STOCK_TRADING_GUI_SESSION_TOKEN"
-
-
-def _config_path(repo_root: Path) -> Path:
-    return Path(repo_root).resolve() / "config.json"
-
-
-def _load_window_geometry(config_path: Path) -> dict[str, int | None]:
-    default = {
-        "width": WINDOW_WIDTH,
-        "height": WINDOW_HEIGHT,
-        "x": None,
-        "y": None,
-    }
-    try:
-        raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
-    except Exception:
-        return dict(default)
-    state_engine = raw.get("state_engine") if isinstance(raw, dict) else {}
-    gui = state_engine.get("gui") if isinstance(state_engine, dict) else {}
-    window = gui.get("window") if isinstance(gui, dict) else {}
-    if not isinstance(window, dict):
-        return dict(default)
-
-    def _parse_int(value: object, *, minimum: int | None = None) -> int | None:
-        if value is None or value == "":
-            return None
-        try:
-            parsed = int(value)
-        except Exception:
-            return None
-        if minimum is not None and parsed < minimum:
-            return None
-        return parsed
-
-    width = _parse_int(window.get("width"), minimum=_WINDOW_GEOMETRY_MIN_WIDTH) or WINDOW_WIDTH
-    height = _parse_int(window.get("height"), minimum=_WINDOW_GEOMETRY_MIN_HEIGHT) or WINDOW_HEIGHT
-    x = _parse_int(window.get("x"))
-    y = _parse_int(window.get("y"))
-    return {
-        "width": width,
-        "height": height,
-        "x": x,
-        "y": y,
-    }
-
-
-def _save_window_geometry(config_path: Path, *, width: int, height: int, x: int | None, y: int | None) -> None:
-    path = Path(config_path)
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            raw = {}
-    except Exception:
-        raw = {}
-    state_engine = raw.get("state_engine")
-    if not isinstance(state_engine, dict):
-        state_engine = {}
-        raw["state_engine"] = state_engine
-    gui = state_engine.get("gui")
-    if not isinstance(gui, dict):
-        gui = {}
-        state_engine["gui"] = gui
-    gui["window"] = {
-        "width": int(width),
-        "height": int(height),
-        "x": None if x is None else int(x),
-        "y": None if y is None else int(y),
-    }
-    path.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-class _WindowGeometryAutosaver:
-    def __init__(self, config_path: Path, *, debounce_seconds: float = 0.35) -> None:
-        self.config_path = Path(config_path)
-        self.debounce_seconds = float(debounce_seconds)
-        self._lock = threading.Lock()
-        self._timer: threading.Timer | None = None
-
-    def schedule(self, window, *args, **kwargs) -> None:
-        with self._lock:
-            if self._timer is not None:
-                self._timer.cancel()
-            self._timer = threading.Timer(self.debounce_seconds, self._persist, args=(window,))
-            self._timer.daemon = True
-            self._timer.start()
-
-    def flush(self, window, *args, **kwargs) -> None:
-        with self._lock:
-            if self._timer is not None:
-                self._timer.cancel()
-                self._timer = None
-        self._persist(window)
-
-    def _persist(self, window) -> None:
-        try:
-            _save_window_geometry(
-                self.config_path,
-                width=int(window.width),
-                height=int(window.height),
-                x=int(window.x) if window.x is not None else None,
-                y=int(window.y) if window.y is not None else None,
-            )
-        except Exception:
-            return
-
-
-class ServerLoopThread(threading.Thread):
-    def __init__(self, repo_root: Path, host: str, port: int, session_token: str) -> None:
-        super().__init__(name="stock-trading-gui-server", daemon=True)
-        self.repo_root = repo_root
-        self.host = host
-        self.port = int(port)
-        self.session_token = str(session_token or "").strip()
-        self.final_action = "shutdown"
-        self.error: BaseException | None = None
-        self.finished = threading.Event()
-
-    def run(self) -> None:
-        try:
-            action = str(
-                run_server(
-                    self.repo_root,
-                    self.host,
-                    self.port,
-                    open_browser=False,
-                    session_token=self.session_token,
-                )
-                or "shutdown"
-            ).strip().lower()
-            self.final_action = action or "shutdown"
-        except BaseException as exc:  # pragma: no cover - captured for desktop mode cleanup
-            self.error = exc
-            self.final_action = "error"
-        finally:
-            self.finished.set()
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="127.0.0.1", help="Host interface for the local GUI server")
-    parser.add_argument("--port", type=int, default=8765, help="Port for the local GUI server")
     parser.add_argument(
-        "--open-browser",
+        "--dev",
         action="store_true",
-        help="Use the legacy browser mode instead of the desktop window",
+        help="Start the Electron desktop in development mode with Vite",
+    )
+    parser.add_argument(
+        "--skip-install",
+        action="store_true",
+        help="Do not auto-run npm install when node_modules is missing",
+    )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Force remove dist/ and dist-electron/ to rebuild the frontend",
     )
     return parser.parse_args()
 
 
-def _build_client_url(host: str, port: int) -> str:
-    value = normalize_gui_host(host)
-    if value == "::1":
-        value = "[::1]"
-    elif ":" in value and not value.startswith("["):
-        value = f"[{value}]"
-    return f"http://{value}:{int(port)}/"
+def _desktop_dir(repo_root: Path) -> Path:
+    return repo_root / "desktop"
 
 
-def _build_authenticated_client_url(host: str, port: int, session_token: str) -> str:
-    base_url = _build_client_url(host, port)
-    query = urllib.parse.urlencode({GUI_SESSION_QUERY_PARAM: str(session_token or "").strip()})
-    if not query:
-        return base_url
-    return f"{base_url}?{query}"
+def _require_binary(name: str) -> str:
+    resolved = shutil.which(name)
+    if not resolved:
+        raise RuntimeError(f"{name} is not installed or is not on PATH.")
+    return resolved
 
 
-def _get_or_create_session_token() -> str:
-    token = str(os.environ.get(_SESSION_TOKEN_ENV_VAR) or "").strip()
-    if token:
-        return token
-    token = secrets.token_urlsafe(24)
-    os.environ[_SESSION_TOKEN_ENV_VAR] = token
-    return token
-
-
-def _wait_for_server(client_url: str, session_token: str, server_thread: ServerLoopThread) -> None:
-    health_base = urllib.parse.urljoin(client_url, "healthz")
-    health_url = f"{health_base}?{urllib.parse.urlencode({GUI_SESSION_QUERY_PARAM: session_token})}"
-    deadline = time.monotonic() + SERVER_START_TIMEOUT_SECONDS
-    last_error: Exception | None = None
-    while time.monotonic() < deadline:
-        if server_thread.error is not None:
-            raise server_thread.error
-        try:
-            with urllib.request.urlopen(health_url, timeout=0.5) as response:
-                if int(getattr(response, "status", 0) or 0) == 200:
-                    return
-        except urllib.error.URLError as exc:
-            last_error = exc
-        except OSError as exc:
-            last_error = exc
-        if server_thread.finished.is_set():
-            break
-        time.sleep(SERVER_POLL_INTERVAL_SECONDS)
-    if server_thread.error is not None:
-        raise server_thread.error
-    raise RuntimeError(f"Timed out waiting for the local GUI server at {client_url}") from last_error
-
-
-def _request_server_shutdown(client_url: str) -> None:
-    control_url = urllib.parse.urljoin(client_url, "server-control")
-    payload = urllib.parse.urlencode({"server_action": "shutdown"}).encode("utf-8")
-    request = urllib.request.Request(
-        control_url,
-        data=payload,
-        method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=1.0):
-            return
-    except Exception:
-        return
-
-
-def _load_webview_module():
-    try:
-        return importlib.import_module("webview")
-    except ModuleNotFoundError as exc:
-        if exc.name != "webview":
-            raise
-        raise RuntimeError(
-            "pywebview is not installed. Install it with `python3 -m pip install pywebview`, "
-            "or run `python3 gui_app.py --open-browser` to use the legacy browser mode."
-        ) from exc
-
-
-def _restart_current_process() -> None:
+def _run_npm(desktop_dir: Path, *npm_args: str) -> int:
     env = os.environ.copy()
-    env[_RESTARTED_ENV_VAR] = "1"
-    os.execvpe(sys.executable, [sys.executable, *sys.argv], env)
+    env["PYTHON"] = sys.executable
+    env.pop("ELECTRON_RUN_AS_NODE", None)
+    npm_bin = shutil.which("npm") or "npm"
+    completed = subprocess.run(
+        [npm_bin, *npm_args],
+        cwd=desktop_dir,
+        env=env,
+        check=False,
+    )
+    return int(completed.returncode or 0)
 
 
-def _watch_server(window, server_thread: ServerLoopThread) -> None:
-    server_thread.finished.wait()
-    try:
-        window.destroy()
-    except Exception:
-        pass
+def _ensure_desktop_dependencies(desktop_dir: Path, *, skip_install: bool) -> None:
+    if (desktop_dir / "node_modules").exists():
+        return
+    if skip_install:
+        raise RuntimeError("desktop/node_modules is missing. Run `npm install` under desktop/ first.")
+    exit_code = _run_npm(desktop_dir, "install")
+    if exit_code != 0:
+        raise RuntimeError("npm install failed for desktop/.")
 
 
-def run_browser_app(repo_root: Path, host: str, port: int, *, open_browser: bool, session_token: str) -> str:
-    return str(
-        run_server(
-            repo_root,
-            host,
-            int(port),
-            open_browser=bool(open_browser),
-            session_token=session_token,
-        )
-        or "shutdown"
-    ).strip().lower()
+def _is_build_stale(desktop_dir: Path) -> bool:
+    renderer_index = desktop_dir / "dist" / "index.html"
+    electron_main = desktop_dir / "dist-electron" / "main.js"
+    if not renderer_index.exists() or not electron_main.exists():
+        return True
+
+    build_mtime = min(renderer_index.stat().st_mtime, electron_main.stat().st_mtime)
+    source_paths = [
+        desktop_dir / "index.html",
+        desktop_dir / "package.json",
+        desktop_dir / "vite.config.ts",
+        desktop_dir / "tsconfig.json",
+        desktop_dir / "tsconfig.node.json",
+        desktop_dir / "src",
+        desktop_dir / "electron",
+    ]
+
+    for source_path in source_paths:
+        if not source_path.exists():
+            continue
+        if source_path.is_file():
+            if source_path.stat().st_mtime > build_mtime:
+                return True
+            continue
+        for root, _, files in os.walk(source_path):
+            for name in files:
+                if (Path(root) / name).stat().st_mtime > build_mtime:
+                    return True
+    return False
 
 
-def run_desktop_app(repo_root: Path, host: str, port: int, session_token: str) -> str:
-    webview = _load_webview_module()
-    client_url = _build_client_url(host, port)
-    authenticated_url = _build_authenticated_client_url(host, port, session_token)
-    geometry = _load_window_geometry(_config_path(repo_root))
-    server_thread = ServerLoopThread(repo_root, host, port, session_token)
-    server_thread.start()
-    try:
-        _wait_for_server(client_url, session_token, server_thread)
-        window = webview.create_window(
-            WINDOW_TITLE,
-            url=authenticated_url,
-            width=int(geometry["width"] or WINDOW_WIDTH),
-            height=int(geometry["height"] or WINDOW_HEIGHT),
-            x=geometry["x"],
-            y=geometry["y"],
-        )
-        autosaver = _WindowGeometryAutosaver(_config_path(repo_root))
-        window.events.moved += autosaver.schedule
-        window.events.resized += autosaver.schedule
-        window.events.closing += autosaver.flush
-
-        def _monitor_server() -> None:
-            _watch_server(window, server_thread)
-
-        webview.start(_monitor_server)
-    finally:
-        if server_thread.is_alive():
-            _request_server_shutdown(client_url)
-            server_thread.join(timeout=2.0)
-    if server_thread.error is not None:
-        raise server_thread.error
-    return str(server_thread.final_action or "shutdown").strip().lower()
+def _ensure_desktop_build(desktop_dir: Path, *, force_rebuild: bool = False) -> None:
+    renderer_index = desktop_dir / "dist" / "index.html"
+    electron_main = desktop_dir / "dist-electron" / "main.js"
+    if force_rebuild or _is_build_stale(desktop_dir):
+        shutil.rmtree(desktop_dir / "dist", ignore_errors=True)
+        shutil.rmtree(desktop_dir / "dist-electron", ignore_errors=True)
+    elif renderer_index.exists() and electron_main.exists():
+        return
+    exit_code = _run_npm(desktop_dir, "run", "build")
+    if exit_code != 0:
+        raise RuntimeError("npm run build failed for desktop/.")
 
 
 def main() -> int:
     args = _parse_args()
     repo_root = Path(__file__).resolve().parent
-    session_token = _get_or_create_session_token()
+    desktop_dir = _desktop_dir(repo_root)
     try:
-        host = normalize_gui_host(args.host)
-    except ValueError as exc:
-        print(f"[GUI] {exc}", file=sys.stderr)
-        return 1
-    if args.open_browser:
-        should_open_browser = os.environ.get(_RESTARTED_ENV_VAR) != "1"
-        action = run_browser_app(
-            repo_root,
-            host,
-            int(args.port),
-            open_browser=should_open_browser,
-            session_token=session_token,
-        )
-        if action == "restart":
-            _restart_current_process()
-        return 0
-    try:
-        action = run_desktop_app(repo_root, host, int(args.port), session_token)
+        _require_binary("node")
+        _require_binary("npm")
     except RuntimeError as exc:
         print(f"[GUI] {exc}", file=sys.stderr)
         return 1
-    if action == "restart":
-        _restart_current_process()
-    return 0
+
+    if not desktop_dir.exists():
+        print("[GUI] desktop/ workspace is missing.", file=sys.stderr)
+        return 1
+
+    restart_flag = repo_root / ".restart_flag"
+    restart_flag.unlink(missing_ok=True)
+    force_rebuild = bool(getattr(args, "rebuild", False))
+
+    try:
+        while True:
+            _ensure_desktop_dependencies(desktop_dir, skip_install=bool(args.skip_install))
+            if args.dev:
+                exit_code = _run_npm(desktop_dir, "run", "dev")
+            else:
+                _ensure_desktop_build(desktop_dir, force_rebuild=force_rebuild)
+                exit_code = _run_npm(desktop_dir, "start")
+
+            if restart_flag.exists():
+                restart_flag.unlink(missing_ok=True)
+                force_rebuild = False
+                print("[GUI] Reload requested. Restarting desktop launcher...", file=sys.stderr)
+                continue
+            return exit_code
+    except RuntimeError as exc:
+        print(f"[GUI] {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

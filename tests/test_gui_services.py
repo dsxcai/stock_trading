@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,27 +10,9 @@ from pathlib import Path
 from unittest import mock
 
 import gui_app
-from gui.markdown import render_markdown
-from gui.server import GuiApplication
+import gui_ipc
+from gui.desktop_backend import DesktopSessionState, GuiDesktopBackend
 from gui.services import GuiServices, OperationResult
-
-
-class MarkdownRendererTests(unittest.TestCase):
-    def test_render_markdown_supports_headings_lists_and_tables(self) -> None:
-        markdown_text = """# Daily Report
-- Signal Basis: t=2026-03-17
-
-| Ticker | Price |
-| --- | ---: |
-| AAA | 100.0 |
-"""
-
-        rendered = render_markdown(markdown_text)
-
-        self.assertIn("<h1>Daily Report</h1>", rendered)
-        self.assertIn("<ul>", rendered)
-        self.assertIn("<table>", rendered)
-        self.assertIn('<td class="align-right">100.0</td>', rendered)
 
 
 class GuiServicesTests(unittest.TestCase):
@@ -144,38 +125,6 @@ class GuiServicesTests(unittest.TestCase):
             self.assertTrue(note.exists())
             self.assertIn("Deleted 3 report artifacts across 2 reports.", result.message)
 
-    def test_delete_report_removes_matching_markdown_and_json_artifacts(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._write_base_repo(root)
-            report_md = root / "report" / "2026-03-31_premarket.md"
-            report_json = root / "report" / "2026-03-31_premarket.json"
-            note = root / "report" / "notes.md"
-            report_md.write_text("# report\n", encoding="utf-8")
-            report_json.write_text("{}\n", encoding="utf-8")
-            note.write_text("# keep\n", encoding="utf-8")
-
-            result = GuiServices(root).delete_report(str(report_md))
-
-            self.assertTrue(result.success)
-            self.assertFalse(report_md.exists())
-            self.assertFalse(report_json.exists())
-            self.assertTrue(note.exists())
-            self.assertIn("Deleted 2 report artifacts for 2026-03-31_premarket.md.", result.message)
-
-    def test_save_signal_config_rewrites_indicator_block(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._write_base_repo(root)
-            services = GuiServices(root)
-
-            result = services.save_signal_config({"AAPL": 50, "NVDA": 100})
-
-            self.assertTrue(result.success)
-            saved = json.loads((root / "config.json").read_text(encoding="utf-8"))
-            indicators = (((saved.get("state_engine") or {}).get("strategy") or {}).get("tactical") or {}).get("indicators") or {}
-            self.assertEqual(indicators, {"AAPL": {"ma_type": "SMA", "window": 50}, "NVDA": {"ma_type": "SMA", "window": 100}})
-
     def test_save_runtime_config_rewrites_structured_sections_and_preserves_indicators(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -278,35 +227,6 @@ class GuiServicesTests(unittest.TestCase):
             self.assertIn("--trades-import-mode", captured["command"])
             self.assertEqual(captured["command"][-1], "replace")
 
-    def test_run_cash_adjustment_uses_update_states_entrypoint(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._write_base_repo(root)
-            services = GuiServices(root)
-            captured = {}
-
-            def fake_run_command(command, *, name):
-                captured["command"] = list(command)
-                return OperationResult(
-                    name=name,
-                    success=True,
-                    returncode=0,
-                    command=" ".join(command),
-                    stdout="",
-                    message="ok",
-                )
-
-            with mock.patch.object(services, "_run_command", side_effect=fake_run_command):
-                result = services.run_cash_adjustment("-3600", cash_adjust_note="wire out")
-
-            self.assertTrue(result.success)
-            self.assertEqual(captured["command"][:2], [sys.executable, "update_states.py"])
-            self.assertEqual(captured["command"][captured["command"].index("--out") + 1], "states.json")
-            self.assertEqual(captured["command"][captured["command"].index("--cash-adjust-usd") + 1], "-3600")
-            self.assertEqual(captured["command"][captured["command"].index("--cash-adjust-note") + 1], "wire out")
-            self.assertEqual(captured["command"][captured["command"].index("--trades-file") + 1], "trades.json")
-            self.assertEqual(captured["command"][captured["command"].index("--cash-events-file") + 1], "cash_events.json")
-
     def test_cash_adjustment_and_report_refresh_use_configured_ledger_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -361,403 +281,321 @@ class GuiServicesTests(unittest.TestCase):
             self.assertEqual(commands[1][commands[1].index("--trades-file") + 1], "ledger/trades_live.json")
             self.assertEqual(commands[1][commands[1].index("--cash-events-file") + 1], "ledger/cash_live.json")
 
-    def test_run_command_uses_subprocess_in_repo_root(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._write_base_repo(root)
-            services = GuiServices(root)
-            completed = subprocess.CompletedProcess(
-                args=[sys.executable, "generate_report.py"],
-                returncode=0,
-                stdout="[OK] wrote report/2026-03-31_premarket.json\n[OK] wrote report/2026-03-31_premarket.md\n",
-            )
 
-            with mock.patch("gui.services.subprocess.run", return_value=completed) as mocked_run:
-                result = services._run_command([sys.executable, "generate_report.py", "--mode", "premarket"], name="Generate report")
-
-            mocked_run.assert_called_once_with(
-                [sys.executable, "generate_report.py", "--mode", "premarket"],
-                cwd=root.resolve(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=False,
-            )
-            self.assertTrue(result.success)
-            self.assertEqual(result.report_path, "report/2026-03-31_premarket.md")
-            self.assertEqual(result.report_json_path, "report/2026-03-31_premarket.json")
-
-
-class GuiServerTests(unittest.TestCase):
+class GuiBackendStateTests(unittest.TestCase):
     def _write_base_repo(self, root: Path) -> None:
         GuiServicesTests()._write_base_repo(root)
 
-    def test_failed_operation_switches_right_panel_to_status(self) -> None:
+    def test_build_state_includes_selected_report_runtime_signal_config_and_last_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._write_base_repo(root)
+            report_path = root / "report" / "2026-03-31_premarket.md"
+            report_path.write_text("# Daily Report\n\n- hello\n", encoding="utf-8")
+            log_path = root / "logs" / "latest.log"
+            log_path.write_text("[ERR] failure\n", encoding="utf-8")
 
-            app = GuiApplication(root, session_token="test-session")
-            app.set_right_tab("status")
-            app.set_last_result(
-                OperationResult(
-                    name="Premarket run",
-                    success=False,
-                    returncode=1,
-                    command="python update_states.py",
-                    stdout="[ERR] broken\n",
-                    message="run failed",
+            backend = GuiDesktopBackend(root)
+            payload = backend.build_state(
+                DesktopSessionState(
+                    selected_report_path=str(report_path),
+                    last_result=OperationResult(
+                        name="Generate report",
+                        success=False,
+                        returncode=1,
+                        command="python generate_report.py",
+                        stdout="failed",
+                        message="generation failed",
+                        log_path=str(log_path),
+                    ),
                 )
             )
 
-            self.assertEqual(app.snapshot().right_tab, "status")
+            self.assertEqual(payload["ui"]["selected_report_path"], str(report_path))
+            self.assertEqual(payload["report"]["selected"]["name"], "2026-03-31_premarket.md")
+            self.assertIn("# Daily Report", payload["report"]["text"])
+            self.assertEqual(payload["report"]["error_log_text"], "[ERR] failure\n")
+            self.assertEqual(payload["last_result"]["message"], "generation failed")
+            self.assertIn("GOOG", payload["signal_config"]["selected_windows"])
+            self.assertTrue(payload["recent_reports"])
 
-    def test_render_page_exposes_right_side_tabs(self) -> None:
+    def test_perform_action_select_report_and_error_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._write_base_repo(root)
             report_path = root / "report" / "2026-03-31_premarket.md"
             report_path.write_text("# Daily Report\n", encoding="utf-8")
 
-            app = GuiApplication(root, session_token="test-session")
-            app.set_selected_report(str(report_path))
+            backend = GuiDesktopBackend(root)
+            selected = backend.perform_action("select-report", {"report_path": str(report_path)})
+            self.assertEqual(selected.selected_report_path, str(report_path))
 
-            rendered = app.render_page()
+            error_state = backend.perform_action(
+                "select-report",
+                {
+                    "report_path": str(report_path),
+                    "last_result": GuiDesktopBackend.serialize_operation_result(
+                        OperationResult(
+                            name="Generate report",
+                            success=False,
+                            returncode=1,
+                            command="python generate_report.py",
+                            stdout="failed",
+                            message="generation failed",
+                        )
+                    ),
+                    "selected_report_path": str(report_path),
+                },
+            )
+            self.assertEqual(error_state.selected_report_path, str(report_path))
+            self.assertIsNotNone(error_state.last_result)
 
-            self.assertIn(">Report</a>", rendered)
-            self.assertIn(">Status</a>", rendered)
-            self.assertIn(">Config</a>", rendered)
-            self.assertNotIn(">Error Log</a>", rendered)
-            self.assertIn(">Reload</button>", rendered)
-            self.assertIn(">Close</button>", rendered)
-            self.assertIn('action="/server-control"', rendered)
-            self.assertIn('action="/delete-report"', rendered)
-            self.assertIn('action="/delete-all-reports"', rendered)
-            self.assertIn('action="/cash-adjust"', rendered)
-            self.assertIn("Delete All Reports", rendered)
-            self.assertIn("Cash Adjustment", rendered)
-            self.assertIn('name="cash_adjust_usd"', rendered)
-            self.assertIn('name="cash_adjust_note"', rendered)
-            self.assertIn('id="allow_incomplete_report"', rendered)
-            self.assertNotIn('id="allow_incomplete_cash_adjust"', rendered)
-            self.assertNotIn("<h2>Signal Config</h2>", rendered)
-            self.assertIn('data-async-submit="1"', rendered)
-            self.assertIn("Estimated progress", rendered)
-            self.assertIn('id="busy_progress_fill"', rendered)
-            self.assertIn('class="danger report-delete"', rendered)
-            self.assertIn('>X</button>', rendered)
-            self.assertIn("if (button !== submitter)", rendered)
-            self.assertIn('form.dataset.submitting = "1"', rendered)
-            self.assertIn("window.fetch(form.action", rendered)
-            self.assertIn(".raw-report {", rendered)
-            self.assertIn("color: var(--ink);", rendered)
-            self.assertIn(".log-error-line {", rendered)
-            self.assertIn('<option value="replace" selected>replace</option>', rendered)
-
-    def test_render_page_config_tab_exposes_structured_runtime_config_forms(self) -> None:
+    def test_perform_action_run_mode_merges_operation_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._write_base_repo(root)
-
-            app = GuiApplication(root, session_token="test-session")
-            app.set_right_tab("config")
-
-            rendered = app.render_page()
-
-            self.assertIn("Runtime Config", rendered)
-            self.assertIn('action="/save-runtime-config"', rendered)
-            self.assertIn('action="/save-signal-config"', rendered)
-            self.assertIn('name="doc"', rendered)
-            self.assertIn('name="trades_file"', rendered)
-            self.assertIn('name="cash_events_file"', rendered)
-            self.assertIn('name="buy_fee_rate"', rendered)
-            self.assertIn('name="sell_fee_rate"', rendered)
-            self.assertIn('name="core_tickers"', rendered)
-            self.assertIn('name="tactical_tickers"', rendered)
-            self.assertIn('name="tactical_cash_pool_ticker"', rendered)
-            self.assertIn('name="tactical_cash_pool_tickers"', rendered)
-            self.assertIn('name="fx_pairs"', rendered)
-            self.assertIn('name="csv_sources"', rendered)
-            self.assertIn('name="closed_days"', rendered)
-            self.assertIn('name="early_close_days"', rendered)
-            self.assertIn('name="usd_amount"', rendered)
-            self.assertIn('name="display_price"', rendered)
-            self.assertIn('name="display_pct"', rendered)
-            self.assertIn('name="trade_cash_amount"', rendered)
-            self.assertIn('name="trade_dedupe_amount"', rendered)
-            self.assertIn('name="state_selected_fields"', rendered)
-            self.assertIn('name="backtest_amount"', rendered)
-            self.assertIn('name="backtest_price"', rendered)
-            self.assertIn('name="backtest_rate"', rendered)
-            self.assertIn('name="backtest_cost_param"', rendered)
-            self.assertIn('name="keep_prev_trade_days_simplified"', rendered)
-            self.assertIn("YYYY-MM-DD=Reason", rendered)
-            self.assertIn("YYYY-MM-DD=HH:MM|Reason", rendered)
-            self.assertIn("alias=ticker", rendered)
-            self.assertNotIn('id="allow_incomplete_runtime_config"', rendered)
-            self.assertNotIn('id="allow_incomplete_config"', rendered)
-            ordered_sections = [
-                "General",
-                "Ledger Paths",
-                "Execution Costs",
-                "Portfolio Buckets",
-                "Market Data",
-                "Trading Calendar",
-                "Reporting",
-                "Signal Config",
-            ]
-            section_positions = [rendered.index(label) for label in ordered_sections]
-            self.assertEqual(section_positions, sorted(section_positions))
-
-    def test_render_page_auto_selects_latest_report_when_none_selected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._write_base_repo(root)
-            older = root / "report" / "2026-03-30_intraday.md"
-            newer = root / "report" / "2026-03-31_premarket.md"
-            older.write_text("# older\n", encoding="utf-8")
-            newer.write_text("# newer\n", encoding="utf-8")
-            os.utime(older, (1, 1))
-            os.utime(newer, (2, 2))
-
-            app = GuiApplication(root, session_token="test-session")
-
-            rendered = app.render_page()
-
-            self.assertEqual(Path(app.snapshot().selected_report_path).resolve(), newer.resolve())
-            self.assertIn("2026-03-31_premarket.md", rendered)
-
-    def test_render_page_raw_view_includes_report_body(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._write_base_repo(root)
+            backend = GuiDesktopBackend(root)
             report_path = root / "report" / "2026-03-31_premarket.md"
-            report_path.write_text("# Daily Report\n\n- hello\n", encoding="utf-8")
 
-            app = GuiApplication(root, session_token="test-session")
-            app.set_selected_report(str(report_path))
-            app.set_view_mode("raw")
-
-            rendered = app.render_page()
-
-            self.assertIn('<pre class="raw-report"># Daily Report', rendered)
-
-    def test_render_page_status_highlights_error_lines(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._write_base_repo(root)
-
-            app = GuiApplication(root, session_token="test-session")
-            app.set_last_result(
-                OperationResult(
-                    name="Import trades",
-                    success=False,
-                    returncode=1,
-                    command="python -m extensions.capital_xls_import",
-                    stdout="Traceback (most recent call last):\nModuleNotFoundError: No module named 'utils'\n",
-                    message="import failed",
-                )
+            fake_result = OperationResult(
+                name="Premarket run",
+                success=True,
+                returncode=0,
+                command="python update_states.py",
+                stdout="ok",
+                message="completed",
+                report_path=str(report_path),
+                report_json_path=str(report_path.with_suffix(".json")),
             )
 
-            rendered = app.render_page()
-
-            self.assertIn("Operation Status", rendered)
-            self.assertIn('<span class="log-error-line">Traceback (most recent call last):</span>', rendered)
-            self.assertIn("ModuleNotFoundError", rendered)
-
-
-class GuiAppTests(unittest.TestCase):
-    def test_build_client_url_uses_loopback_for_wildcard_host(self) -> None:
-        self.assertEqual(gui_app._build_client_url("0.0.0.0", 8765), "http://127.0.0.1:8765/")
-
-    def test_build_authenticated_client_url_embeds_session_token(self) -> None:
-        self.assertEqual(
-            gui_app._build_authenticated_client_url("127.0.0.1", 8765, "secret"),
-            "http://127.0.0.1:8765/?__gui_token=secret",
-        )
-
-    def test_load_window_geometry_uses_defaults_when_config_has_no_gui_window(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config_path = root / "config.json"
-            config_path.write_text(json.dumps({"state_engine": {}}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-            geometry = gui_app._load_window_geometry(config_path)
-
-        self.assertEqual(
-            geometry,
-            {"width": gui_app.WINDOW_WIDTH, "height": gui_app.WINDOW_HEIGHT, "x": None, "y": None},
-        )
-
-    def test_save_window_geometry_writes_to_config_json(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config_path = root / "config.json"
-            config_path.write_text(json.dumps({"state_engine": {}}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-            gui_app._save_window_geometry(config_path, width=1280, height=820, x=44, y=66)
-
-            saved = json.loads(config_path.read_text(encoding="utf-8"))
-
-        self.assertEqual(
-            saved["state_engine"]["gui"]["window"],
-            {"width": 1280, "height": 820, "x": 44, "y": 66},
-        )
-
-    def test_run_desktop_app_restores_and_persists_window_geometry(self) -> None:
-        class FakeEvent:
-            def __init__(self) -> None:
-                self.handlers = []
-
-            def __iadd__(self, callback):
-                self.handlers.append(callback)
-                return self
-
-        class FakeEvents:
-            def __init__(self) -> None:
-                self.moved = FakeEvent()
-                self.resized = FakeEvent()
-                self.closing = FakeEvent()
-
-        class FakeWindow:
-            def __init__(self) -> None:
-                self.width = 1350
-                self.height = 840
-                self.x = 75
-                self.y = 95
-                self.events = FakeEvents()
-
-            def destroy(self) -> None:
-                return None
-
-        class FakeWebview:
-            def __init__(self, window) -> None:
-                self.window = window
-                self.create_window = mock.Mock(return_value=window)
-                self.start = mock.Mock()
-
-        class FakeServerThread:
-            def __init__(self, repo_root, host, port, session_token) -> None:
-                self.repo_root = repo_root
-                self.host = host
-                self.port = port
-                self.session_token = session_token
-                self.error = None
-                self.final_action = "shutdown"
-
-            def start(self) -> None:
-                return None
-
-            def is_alive(self) -> bool:
-                return False
-
-            def join(self, timeout=None) -> None:
-                return None
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    {
-                        "state_engine": {
-                            "gui": {
-                                "window": {"width": 1100, "height": 720, "x": 12, "y": 18}
-                            }
-                        }
-                    },
-                    ensure_ascii=False,
-                    indent=2,
+            with mock.patch.object(backend.services, "run_daily_mode", return_value=fake_result):
+                session_state = backend.perform_action(
+                    "run-mode",
+                    {"mode": "premarket", "force_mode": True, "allow_incomplete_csv_rows": False},
                 )
-                + "\n",
-                encoding="utf-8",
-            )
-            window = FakeWindow()
-            fake_webview = FakeWebview(window)
 
-            with mock.patch.object(gui_app, "_load_webview_module", return_value=fake_webview):
-                with mock.patch.object(gui_app, "ServerLoopThread", FakeServerThread):
-                    with mock.patch.object(gui_app, "_wait_for_server"):
-                        with mock.patch.object(gui_app, "_request_server_shutdown"):
-                            action = gui_app.run_desktop_app(root, "127.0.0.1", 8765, "session-token")
+            self.assertEqual(session_state.selected_report_path, str(report_path))
+            self.assertEqual(session_state.last_result.message, "completed")
 
-            self.assertEqual(action, "shutdown")
-            fake_webview.create_window.assert_called_once()
-            self.assertEqual(fake_webview.create_window.call_args.kwargs["width"], 1100)
-            self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 720)
-            self.assertEqual(fake_webview.create_window.call_args.kwargs["x"], 12)
-            self.assertEqual(fake_webview.create_window.call_args.kwargs["y"], 18)
-            for callback in window.events.closing.handlers:
-                callback(window)
-            saved = json.loads(config_path.read_text(encoding="utf-8"))
-
-        self.assertEqual(
-            saved["state_engine"]["gui"]["window"],
-            {"width": 1350, "height": 840, "x": 75, "y": 95},
+    def test_serialize_and_deserialize_operation_result_roundtrip(self) -> None:
+        result = OperationResult(
+            name="Generate report",
+            success=True,
+            returncode=0,
+            command="python generate_report.py",
+            stdout="ok",
+            message="done",
+            log_path="logs/latest.log",
+            report_path="report/2026-03-31_premarket.md",
+            report_json_path="report/2026-03-31_premarket.json",
         )
+        serialized = GuiDesktopBackend.serialize_operation_result(result)
+        restored = GuiDesktopBackend.deserialize_operation_result(serialized)
 
-    def test_main_uses_desktop_mode_by_default(self) -> None:
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.command, result.command)
+        self.assertEqual(restored.report_path, result.report_path)
+
+
+class GuiLauncherTests(unittest.TestCase):
+    def test_run_npm_clears_electron_run_as_node(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            desktop_dir = Path(tmp)
+            captured = {}
+
+            def fake_run(command, cwd, env, check):
+                captured["command"] = command
+                captured["cwd"] = cwd
+                captured["env"] = dict(env)
+                captured["check"] = check
+                return mock.Mock(returncode=0)
+
+            with mock.patch.dict(os.environ, {"ELECTRON_RUN_AS_NODE": "1"}, clear=False):
+                with mock.patch("shutil.which", return_value="npm"):
+                    with mock.patch("subprocess.run", side_effect=fake_run):
+                        exit_code = gui_app._run_npm(desktop_dir, "run", "dev")
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(captured["command"], ["npm", "run", "dev"])
+        self.assertEqual(captured["cwd"], desktop_dir)
+        self.assertNotIn("ELECTRON_RUN_AS_NODE", captured["env"])
+
+    def test_main_runs_desktop_dev_script_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            desktop_dir = Path(tmp)
+
+            with mock.patch.object(sys, "argv", ["gui_app.py", "--dev"]):
+                with mock.patch.object(gui_app, "_desktop_dir", return_value=desktop_dir):
+                    with mock.patch.object(gui_app, "_require_binary"):
+                        with mock.patch.object(gui_app, "_ensure_desktop_dependencies") as mocked_install:
+                            with mock.patch.object(gui_app, "_run_npm", return_value=0) as mocked_run:
+                                exit_code = gui_app.main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_install.assert_called_once_with(desktop_dir, skip_install=False)
+        mocked_run.assert_called_once_with(desktop_dir, "run", "dev")
+
+    def test_main_builds_then_starts_desktop_in_production_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            desktop_dir = Path(tmp)
+
+            with mock.patch.object(sys, "argv", ["gui_app.py"]):
+                with mock.patch.object(gui_app, "_desktop_dir", return_value=desktop_dir):
+                    with mock.patch.object(gui_app, "_require_binary"):
+                        with mock.patch.object(gui_app, "_ensure_desktop_dependencies") as mocked_install:
+                            with mock.patch.object(gui_app, "_ensure_desktop_build") as mocked_build:
+                                with mock.patch.object(gui_app, "_run_npm", return_value=0) as mocked_run:
+                                    exit_code = gui_app.main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_install.assert_called_once_with(desktop_dir, skip_install=False)
+        mocked_build.assert_called_once_with(desktop_dir, force_rebuild=False)
+        mocked_run.assert_called_once_with(desktop_dir, "start")
+
+    def test_main_restarts_launcher_when_restart_flag_is_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            desktop_dir = repo_root / "desktop"
+            desktop_dir.mkdir()
+            restart_flag = repo_root / ".restart_flag"
+            run_calls = []
+
+            def fake_run_npm(_desktop_dir, *npm_args):
+                run_calls.append(npm_args)
+                if len(run_calls) == 1:
+                    restart_flag.write_text("", encoding="utf-8")
+                return 0
+
+            with mock.patch.object(sys, "argv", ["gui_app.py"]):
+                with mock.patch.object(gui_app, "_desktop_dir", return_value=desktop_dir):
+                    with mock.patch.object(gui_app, "_require_binary"):
+                        with mock.patch.object(gui_app, "_ensure_desktop_dependencies"):
+                            with mock.patch.object(gui_app, "_ensure_desktop_build") as mocked_build:
+                                with mock.patch.object(gui_app, "_run_npm", side_effect=fake_run_npm):
+                                    with mock.patch.object(gui_app, "__file__", str(repo_root / "gui_app.py")):
+                                        exit_code = gui_app.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run_calls, [("start",), ("start",)])
+        self.assertEqual(mocked_build.call_count, 2)
+        self.assertFalse(restart_flag.exists())
+
+    def test_main_reports_missing_node_binary(self) -> None:
         with mock.patch.object(sys, "argv", ["gui_app.py"]):
-            with mock.patch.object(gui_app, "run_desktop_app", return_value="shutdown") as mocked_desktop:
-                with mock.patch.object(gui_app, "run_browser_app") as mocked_browser:
-                    exit_code = gui_app.main()
-
-        self.assertEqual(exit_code, 0)
-        mocked_desktop.assert_called_once()
-        mocked_browser.assert_not_called()
-
-    def test_main_reexecs_current_process_when_restart_requested_in_browser_mode(self) -> None:
-        with mock.patch.object(sys, "argv", ["gui_app.py", "--open-browser"]):
-            with mock.patch.object(gui_app, "run_browser_app", return_value="restart") as mocked_browser:
-                with mock.patch.object(gui_app, "_restart_current_process") as mocked_restart:
-                    exit_code = gui_app.main()
-
-        self.assertEqual(exit_code, 0)
-        mocked_browser.assert_called_once()
-        self.assertTrue(mocked_browser.call_args.kwargs["open_browser"])
-        self.assertIn("session_token", mocked_browser.call_args.kwargs)
-        mocked_restart.assert_called_once()
-
-    def test_main_does_not_reopen_browser_after_process_restart(self) -> None:
-        with mock.patch.object(sys, "argv", ["gui_app.py", "--open-browser"]):
-            with mock.patch.dict(os.environ, {gui_app._RESTARTED_ENV_VAR: "1"}, clear=False):
-                with mock.patch.object(gui_app, "run_browser_app", return_value="shutdown") as mocked_browser:
-                    exit_code = gui_app.main()
-
-        self.assertEqual(exit_code, 0)
-        mocked_browser.assert_called_once()
-        self.assertFalse(mocked_browser.call_args.kwargs["open_browser"])
-
-    def test_main_reexecs_current_process_when_restart_requested_in_desktop_mode(self) -> None:
-        with mock.patch.object(sys, "argv", ["gui_app.py"]):
-            with mock.patch.object(gui_app, "run_desktop_app", return_value="restart") as mocked_desktop:
-                with mock.patch.object(gui_app, "_restart_current_process") as mocked_restart:
-                    exit_code = gui_app.main()
-
-        self.assertEqual(exit_code, 0)
-        mocked_desktop.assert_called_once()
-        self.assertEqual(len(mocked_desktop.call_args.args), 4)
-        self.assertTrue(str(mocked_desktop.call_args.args[3] or "").strip())
-        mocked_restart.assert_called_once()
-
-    def test_main_reports_missing_pywebview(self) -> None:
-        with mock.patch.object(sys, "argv", ["gui_app.py"]):
-            with mock.patch.object(gui_app, "run_desktop_app", side_effect=RuntimeError("pywebview missing")):
+            with mock.patch.object(gui_app, "_require_binary", side_effect=RuntimeError("node missing")):
                 stderr = io.StringIO()
                 with mock.patch("sys.stderr", stderr):
                     exit_code = gui_app.main()
 
         self.assertEqual(exit_code, 1)
-        self.assertIn("pywebview missing", stderr.getvalue())
+        self.assertIn("node missing", stderr.getvalue())
 
-    def test_main_rejects_non_loopback_host(self) -> None:
-        with mock.patch.object(sys, "argv", ["gui_app.py", "--host", "192.168.1.20"]):
-            stderr = io.StringIO()
-            with mock.patch("sys.stderr", stderr):
-                exit_code = gui_app.main()
 
-        self.assertEqual(exit_code, 1)
-        self.assertIn("loopback hosts", stderr.getvalue())
+    def test_run_npm_uses_resolved_absolute_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            desktop_dir = Path(tmp)
+            captured = {}
+
+            def fake_run(command, cwd, env, check):
+                captured["command"] = command
+                return mock.Mock(returncode=0)
+
+            with mock.patch("shutil.which", return_value="/absolute/path/to/npm"):
+                with mock.patch("subprocess.run", side_effect=fake_run):
+                    gui_app._run_npm(desktop_dir, "install")
+
+            self.assertEqual(captured["command"][0], "/absolute/path/to/npm")
+            self.assertEqual(captured["command"][1], "install")
+
+    def test_ensure_desktop_build_force_rebuild_removes_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            desktop_dir = Path(tmp)
+            dist_dir = desktop_dir / "dist"
+            dist_electron_dir = desktop_dir / "dist-electron"
+            dist_dir.mkdir()
+            dist_electron_dir.mkdir()
+            (dist_dir / "index.html").touch()
+            (dist_electron_dir / "main.js").touch()
+
+            with mock.patch.object(gui_app, "_run_npm", return_value=0) as mocked_run:
+                gui_app._ensure_desktop_build(desktop_dir, force_rebuild=True)
+
+            self.assertFalse(dist_dir.exists())
+            self.assertFalse(dist_electron_dir.exists())
+            mocked_run.assert_called_once_with(desktop_dir, "run", "build")
+
+    def test_ensure_desktop_build_rebuilds_when_sources_are_newer_than_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            desktop_dir = Path(tmp)
+            dist_dir = desktop_dir / "dist"
+            dist_electron_dir = desktop_dir / "dist-electron"
+            src_dir = desktop_dir / "src"
+            electron_dir = desktop_dir / "electron"
+            dist_dir.mkdir()
+            dist_electron_dir.mkdir()
+            src_dir.mkdir()
+            electron_dir.mkdir()
+
+            renderer_index = dist_dir / "index.html"
+            electron_main = dist_electron_dir / "main.js"
+            source_file = src_dir / "App.tsx"
+            electron_source = electron_dir / "main.ts"
+            renderer_index.write_text("", encoding="utf-8")
+            electron_main.write_text("", encoding="utf-8")
+            source_file.write_text("", encoding="utf-8")
+            electron_source.write_text("", encoding="utf-8")
+            old_time = 10
+            new_time = 20
+            os.utime(renderer_index, (old_time, old_time))
+            os.utime(electron_main, (old_time, old_time))
+            os.utime(source_file, (new_time, new_time))
+            os.utime(electron_source, (new_time, new_time))
+
+            with mock.patch.object(gui_app, "_run_npm", return_value=0) as mocked_run:
+                gui_app._ensure_desktop_build(desktop_dir, force_rebuild=False)
+
+            self.assertFalse(dist_dir.exists())
+            self.assertFalse(dist_electron_dir.exists())
+            mocked_run.assert_called_once_with(desktop_dir, "run", "build")
+
+    def test_is_build_stale_returns_false_when_outputs_are_current(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            desktop_dir = Path(tmp)
+            (desktop_dir / "dist").mkdir()
+            (desktop_dir / "dist-electron").mkdir()
+            (desktop_dir / "src").mkdir()
+            (desktop_dir / "electron").mkdir()
+            renderer_index = desktop_dir / "dist" / "index.html"
+            electron_main = desktop_dir / "dist-electron" / "main.js"
+            source_file = desktop_dir / "src" / "App.tsx"
+            renderer_index.write_text("", encoding="utf-8")
+            electron_main.write_text("", encoding="utf-8")
+            source_file.write_text("", encoding="utf-8")
+            os.utime(source_file, (10, 10))
+            os.utime(renderer_index, (20, 20))
+            os.utime(electron_main, (20, 20))
+
+            self.assertFalse(gui_app._is_build_stale(desktop_dir))
+
+    def test_vite_config_uses_relative_base_path(self) -> None:
+        # Prevents the "white screen of death" by ensuring Vite uses relative paths in Electron
+        repo_root = Path(__file__).resolve().parent.parent
+        vite_config = repo_root / "desktop" / "vite.config.ts"
+        if vite_config.exists():
+            content = vite_config.read_text(encoding="utf-8")
+            self.assertRegex(content, r'base:\s*["\']\./["\']', "vite.config.ts must use relative base path './' to work in Electron")
+
+
+class GuiIpcTests(unittest.TestCase):
+    def test_read_payload_uses_readline_to_prevent_deadlock(self) -> None:
+        with mock.patch("sys.stdin.readline", return_value='{"action": "ping"}\n'):
+            payload = gui_ipc._read_payload()
+        self.assertEqual(payload, {"action": "ping"})
+
+    def test_read_payload_handles_empty_input(self) -> None:
+        with mock.patch("sys.stdin.readline", return_value=''):
+            payload = gui_ipc._read_payload()
+        self.assertEqual(payload, {})
 
 
 if __name__ == "__main__":

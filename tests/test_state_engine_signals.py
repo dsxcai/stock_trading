@@ -371,7 +371,32 @@ class StateEngineSignalTests(unittest.TestCase):
         self.assertEqual(str(row.get("t_plus_1_action")), "SELL_ALL")
         self.assertEqual(int(row.get("action_shares") or 0), 10)
 
+    def test_selected_market_close_without_report_date_uses_latest_fx(self) -> None:
+        # This preserves the "original test behavior" where a live run (without report date)
+        # correctly takes the absolute latest FX data (rows[-1])
+        rows = [
+            {"Date": "2026-03-24", "Close": 100.0},
+            {"Date": "2026-03-25", "Close": 110.0},
+            {"Date": "2026-03-26", "Close": 120.0},
+        ]
+        live_runtime = {
+            "config": {
+                "reporting": {"numeric_precision": _numeric_precision()},
+                "data": {"fx_pairs": {"usd_twd": {"ticker": "TWD=X"}}},
+            },
+            "report_meta": {}, # No report date cap
+        }
+        self.assertEqual(
+            state_engine._selected_market_close_for_runtime(live_runtime, "TWD=X", rows),
+            ("2026-03-26", 120.0),
+        )
+        self.assertEqual(
+            state_engine._selected_market_close_for_runtime(live_runtime, "AAA", rows),
+            ("2026-03-26", 120.0),
+        )
+
     def test_selected_market_close_uses_mode_specific_history_day(self) -> None:
+        # This verifies the new Look-ahead bias fix for historical runs
         rows = [
             {"Date": "2026-03-24", "Close": 100.0},
             {"Date": "2026-03-25", "Close": 110.0},

@@ -6,11 +6,25 @@ The format is inspired by Keep a Changelog, and this project uses semantic versi
 
 ## [Unreleased]
 
-- GUI long-running operations now keep a stable in-page busy overlay and show estimated progress percentages instead of relying on a best-effort page-lock effect during synchronous form submission.
-- GUI now exposes a structured `Config` tab alongside `Report` and `Status`, covering all current live runtime config sections instead of limiting GUI config edits to tactical SMA indicators.
+### Breaking changes
+- `python3 gui_app.py` now launches the Electron desktop app directly. The old browser-first dashboard flow and the local GUI HTTP server path have been removed.
 
 ### Added
+- `desktop/` workspace built with `React + TypeScript + Electron`.
+- JSON/stdin Python bridge via `gui_ipc.py` and `gui/desktop_backend.py`, so desktop actions can call `GuiServices` without HTTP transport.
+- Desktop launcher checks in `gui_app.py` for `node` and `npm`, automatic `npm install` when `desktop/node_modules` is missing, and automatic build of `desktop/dist/` and `desktop/dist-electron/` before production launch.
+- Desktop viewer tabs for `Report`, `Status`, and structured `Config`, plus app-level `Reload` and `Close` controls.
+
 - GUI cash-adjustment controls for recording external deposits and withdrawals through `update_states.py --cash-adjust-usd`, with optional notes and selected-report refresh.
+- GUI contributor-friendly frontend workflow through `python3 gui_app.py --dev`, which runs renderer and Electron watch builds before launching the shell.
+
+### Changed
+- GUI transport switched from server-rendered pages to Electron IPC-backed process execution.
+- Desktop actions such as mode runs, ad hoc report generation, Capital XLS imports, report cleanup, runtime config edits, and signal config edits now flow through the desktop bridge while reusing the existing Python trading logic.
+
+### Removed
+- Browser-based GUI entrypoint via `python3 gui_app.py --open-browser`.
+- Local GUI HTTP server and session-handling code from the active desktop path.
 
 ## [1.2] - 2026-04-03
 

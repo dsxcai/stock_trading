@@ -11,14 +11,15 @@ The purpose of this document is as follows:
 
 ## 1. Local GUI
 
-The project now includes a local GUI for routine operation. It is a Python application that serves the existing local dashboard into a native desktop window through `pywebview`, so day-to-day workflows can be executed without typing the underlying commands manually and without opening a separate browser yourself.
+The project now includes an Electron desktop GUI for routine operation. The desktop shell is built with `React + TypeScript + Electron`, and Electron calls the local Python trading logic directly through IPC-backed process execution. There is no browser dashboard and no local GUI HTTP server in the new path.
 
 ### 1.1 Start the GUI
 
-Install the desktop window dependency once:
+If you want to install the desktop dependencies explicitly once:
 
 ```bash
-python3 -m pip install pywebview
+cd desktop
+npm install
 ```
 
 Recommended:
@@ -27,13 +28,31 @@ Recommended:
 python3 gui_app.py
 ```
 
-This starts the local HTTP server and opens the GUI in a native desktop window.
+This launches the Electron desktop app. If `desktop/node_modules` is missing, `gui_app.py` will run `npm install` automatically. If the production build is missing, it will also build `desktop/dist/` and `desktop/dist-electron/` before starting.
 
-If you want to keep using the old browser-based mode instead:
+For active frontend development:
 
 ```bash
-python3 gui_app.py --open-browser
+python3 gui_app.py --dev
 ```
+
+This starts renderer watch builds and the Electron shell together. `gui_app.py` also exports the current Python interpreter through `PYTHON`, so the Electron process can start the matching local backend environment.
+
+If you want to force a clean desktop rebuild first:
+
+```bash
+python3 gui_app.py --rebuild
+```
+
+The desktop execution chain is:
+
+- React renderer in `desktop/src/`
+- Electron main process in `desktop/electron/main.ts`
+- JSON/stdin bridge in `gui_ipc.py`
+- desktop action layer in `gui/desktop_backend.py`
+- trading logic and file operations in `gui/services.py`
+
+This means frontend contributors can work inside the `desktop/` workspace, while the existing Python portfolio and report logic remains in the repository root.
 
 ### 1.2 What the GUI currently covers
 
@@ -91,7 +110,7 @@ The `Config` tab currently covers:
 
 ### 1.5 Reload and close the GUI
 
-The GUI also exposes app controls directly in the upper-left card:
+The Electron app also exposes app controls directly in the upper-left card:
 
 <p>
   <img src="docs/images/gui-server-controls.png" alt="GUI control card with Reload and Close buttons" width="420">
@@ -99,8 +118,8 @@ The GUI also exposes app controls directly in the upper-left card:
 
 Use them as follows:
 
-- `Reload`: restart the full local GUI process and reconnect the current app session. Use this after code changes when you want the GUI to pick up the latest Python and view code without manually re-running `python3 gui_app.py`.
-- `Close`: exit the local GUI process completely. In desktop mode, this closes the current GUI window. In browser mode, this ends the current GUI session until you start it again from the terminal.
+- `Reload`: restart the full Electron desktop app and reconnect the current session. Use this after frontend or backend code changes when you want the app to pick up the latest code without re-running `python3 gui_app.py`.
+- `Close`: exit the desktop app completely.
 
 ### 1.6 Current GUI limitations
 

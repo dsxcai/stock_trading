@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from gui.server import GuiApplication
 from gui.services import GuiServices, OperationResult
 from tests.test_gui_services import GuiServicesTests
 
@@ -46,23 +45,6 @@ class GuiImportTradeDateRangeTests(unittest.TestCase):
             self.assertIn("--trade-date-to", captured["command"])
             self.assertIn("2026-03-20", captured["command"])
             self.assertIn("2026-03-31", captured["command"])
-
-    def test_render_page_exposes_trade_date_range_inputs_for_import(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._write_base_repo(root)
-            report_path = root / "report" / "2026-03-31_premarket.md"
-            report_path.write_text("# Daily Report\n", encoding="utf-8")
-
-            app = GuiApplication(root, session_token="test-session")
-            app.set_selected_report(str(report_path))
-
-            rendered = app.render_page()
-
-            self.assertIn('name="trade_date_from"', rendered)
-            self.assertIn('name="trade_date_to"', rendered)
-            self.assertIn("Optional trade-date bounds filter the imported XLS rows before append or replace.", rendered)
-
 
 if __name__ == "__main__":
     unittest.main()

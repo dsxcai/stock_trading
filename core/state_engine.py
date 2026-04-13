@@ -275,8 +275,13 @@ def _selected_market_close_for_runtime(runtime: Dict[str, Any], ticker: str, row
         return (None, None)
     ticker_norm = str(ticker or '').upper().strip()
     if ticker_norm in _fx_tickers_from_config(runtime):
-        row = rows[-1]
-        return (str(row.get('Date') or ''), _safe_float(row.get('Close')))
+        report_meta = _runtime_report_meta(runtime)
+        cap_date = report_meta.get('report_date') or report_meta.get('t_plus_1_et')
+        filtered_rows = _history_rows_on_or_before(rows, cap_date) if cap_date else rows
+        if filtered_rows:
+            row = filtered_rows[-1]
+            return (str(row.get('Date') or ''), _safe_float(row.get('Close')))
+        return (None, None)
     signal_day = _runtime_signal_basis_day(runtime)
     if signal_day:
         filtered = _history_rows_on_or_before(rows, signal_day)
