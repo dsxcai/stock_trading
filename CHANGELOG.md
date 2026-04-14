@@ -4,23 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog, and this project uses semantic versioning.
 
-## [Unreleased]
+## [1.3] - 2026-04-14
 
 ### Breaking changes
 - `python3 gui_app.py` now launches the Electron desktop app directly. The old browser-first dashboard flow and the local GUI HTTP server path have been removed.
+- Split cash flow history from `states.json` into a new dedicated `cash_events.json` ledger. Legacy cash history is automatically migrated.
 
 ### Added
 - `desktop/` workspace built with `React + TypeScript + Electron`.
 - JSON/stdin Python bridge via `gui_ipc.py` and `gui/desktop_backend.py`, so desktop actions can call `GuiServices` without HTTP transport.
-- Desktop launcher checks in `gui_app.py` for `node` and `npm`, automatic `npm install` when `desktop/node_modules` is missing, and automatic build of `desktop/dist/` and `desktop/dist-electron/` before production launch.
 - Desktop viewer tabs for `Report`, `Status`, and structured `Config`, plus app-level `Reload` and `Close` controls.
-
+- Unified report generation flow in the GUI to handle both latest sessions and specific historical dates.
+- Trade-date range filter (`Trade Date From` / `Trade Date To`) for Capital XLS imports.
+- GUI controls to multi-select and delete generated report artifacts.
 - GUI cash-adjustment controls for recording external deposits and withdrawals through `update_states.py --cash-adjust-usd`, with optional notes and selected-report refresh.
+- GUI window geometry persistence and state restore via `config.json`.
 - GUI contributor-friendly frontend workflow through `python3 gui_app.py --dev`, which runs renderer and Electron watch builds before launching the shell.
 
 ### Changed
 - GUI transport switched from server-rendered pages to Electron IPC-backed process execution.
 - Desktop actions such as mode runs, ad hoc report generation, Capital XLS imports, report cleanup, runtime config edits, and signal config edits now flow through the desktop bridge while reusing the existing Python trading logic.
+- Split execution fees into distinct buy and sell fee rates for finer configuration.
+- Stabilized GUI busy state and UX for long-running actions.
+- Included the tactical cash pool ticker in the signal status report.
+- Sorted Signal Status table by `B-A` (SMA - Price) and refined threshold display formats.
+
+### Fixed
+- Fixed report regressions, including historical FX look-ahead bias and threshold displays.
+- Migrated legacy cash history properly before applying performance updates.
+- Refined trade detail cash flow to ensure zero-budget buy actions render correctly.
 
 ### Removed
 - Browser-based GUI entrypoint via `python3 gui_app.py --open-browser`.
