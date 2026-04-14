@@ -12,6 +12,7 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.node.json",
     "start": "electron .",
+    "capture:docs": "electron ../utils/capture_gui_screenshots.js",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {

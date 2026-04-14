@@ -54,48 +54,129 @@ The desktop execution chain is:
 
 This means frontend contributors can work inside the `desktop/` workspace, while the existing Python portfolio and report logic remains in the repository root.
 
+To refresh all GUI screenshots referenced in this README from the latest desktop code, run:
+
+```bash
+./capture_readme_screenshots.sh
+```
+
 ### 1.2 What the GUI currently covers
 
-The main screen currently supports the following:
+The current Electron GUI is centered on one left-side control rail and one right-side viewer. In routine use, it lets you:
 
-- auto-load the latest available report when the page opens, then let you switch from `Recent Reports`
-- run `Premarket`, `Intraday`, and `AfterClose`
-- optionally enable `Allow force mode`
-- optionally enable `Allow incomplete CSV rows`
-- generate a report for a selected mode and report date
+- auto-load the latest available report when the app opens, then switch from `Recent Reports`
+- generate a report from one unified `Generate Report` panel
+- choose whether the report basis is the latest trading session or a specified historical trading day
+- run `Premarket`, `Intraday`, or `AfterClose` for the latest trading session
+- run `Premarket` or `AfterClose` for a specified historical trading day
+- optionally enable `Allow force mode` only when the report basis is the latest trading session
+- optionally enable `Allow incomplete CSV rows` when the current workflow tolerates partial CSV data
 - import Capital XLS trade history with `replace` or `append`
 - optionally limit Capital XLS imports to an ET trade-date range before `append` or `replace` is applied
-- record external cash deposits or withdrawals with a signed USD amount and optional note
+- record external cash deposits or withdrawals with a signed USD amount and a single-line note
 - regenerate the currently selected report automatically after imports, cash adjustments, or config changes when the target report can be identified
-- edit all current live runtime settings in `config.json` through a structured `Config` tab, including buckets, FX pairs, trading calendar entries, numeric precision, render policy, and tactical indicators
-- select recent markdown reports and switch between rendered markdown and raw markdown
-- inspect the latest operation status and highlighted error output
-- reload or close the local GUI from the GUI itself
+- edit live runtime settings in the `Config` tab, including ledger paths, fee rates, buckets, FX pairs, trading calendar entries, numeric precision, and tactical indicators
+- inspect the latest operation status, command, exit code, report path, log path, and captured log output
+- multi-select recent reports with checkboxes, `Select All` / `Deselect All`, and `Delete All Selects`
+- reload or close the desktop app directly from the GUI
 
 ### 1.3 Main screen layout
 
-The GUI is split into two areas:
-
-- left side: operational controls such as Daily Run, Generate Report, Import Trades, Cash Adjustment, and Recent Reports
-- right side: the main viewer, with `Report`, `Status`, and `Config` tabs
-
-The `Report` tab renders the selected markdown report directly in the GUI. The `Status` tab shows the latest operation result, including the report path, log path, exit code, and captured log output. If an operation fails, error lines are highlighted in red. The `Config` tab exposes structured forms for the current runtime configuration instead of requiring direct JSON editing.
+The current GUI layout is shown below. This screenshot reflects the new Electron desktop shell and its current control flow.
 
 <p>
-  <img src="docs/images/gui-overview.png" alt="GUI overview showing the left-side operation panels and the report viewer on the right" width="980">
+  <img src="docs/images/gui-overview-current.png" alt="Current Electron GUI layout with a left control rail and a right viewer workspace" width="980">
 </p>
 
-The screenshot above shows the normal working layout:
+Read it as follows:
 
-- the left column is where you run the daily workflow, generate ad hoc reports, import broker trades, adjust cash, and switch recent reports
-- the right viewer is where you read the selected report, inspect operation status, or edit runtime configuration from the `Config` tab
+- the left control rail is where routine actions happen: `Generate Report`, `Import Trades`, `Cash Adjustment`, and `Recent Reports`
+- the upper-left hero card contains app-level actions: `Reload` and `Close`
+- the right workspace has three tabs:
+  - `Report`: rendered markdown or raw markdown
+  - `Status`: the latest command result and captured logs
+  - `Config`: structured runtime and signal configuration forms
 
-### 1.4 Config tab
+For quick orientation:
 
-The `Config` tab is intended to replace direct `config.json` editing for routine changes. It keeps the same canonical settings layout, but exposes it as grouped forms so the commonly adjusted parameters can be changed safely from the GUI.
+| Area | What it is for |
+| --- | --- |
+| `Generate Report` | Generate the latest report or a historical report from one form |
+| `Import Trades` | Import Capital XLS history and refresh the selected report |
+| `Cash Adjustment` | Record deposits or withdrawals as signed USD cash events |
+| `Recent Reports` | Switch the viewer target, select many reports, or delete generated artifacts |
+| `Report` tab | Read the selected markdown report |
+| `Status` tab | Confirm what command ran, whether it succeeded, and what it logged |
+| `Config` tab | Edit `config.json` through grouped forms instead of raw JSON editing |
+
+### 1.4 Generate a report
+
+The report workflow is no longer split between a separate "daily run" panel and a separate "generate report" panel. The GUI now exposes one `Generate Report` form, and the only high-level choice is whether you want:
+
+- the latest trading session
+- a specified historical trading day
+
+| Latest Trading Session | Specified Historical Trading Day |
+|:--:|:--:|
+| <img src="docs/images/gui-generate-report-latest-current.png" alt="Generate Report panel in latest trading session mode" width="420"> | <img src="docs/images/gui-generate-report-historical-current.png" alt="Generate Report panel in historical trading day mode with the date field visible" width="420"> |
+
+
+Use the panel this way:
+
+1. Choose `Report Basis`.
+2. If you choose `Latest trading session`, the form can run `Premarket`, `Intraday`, or `AfterClose`, and `Allow force mode` is available.
+3. If you choose `Specified historical trading day`, the form reveals `Trading Day`, hides `Allow force mode`, and removes `Intraday` from the mode list because intraday is only meaningful for the live/latest session.
+4. Choose the target `Mode`.
+5. If needed, enable `Allow incomplete CSV rows`.
+6. Click `Generate Report`.
+7. Review the result in the `Report` tab. If anything looks wrong, switch to `Status` to inspect the exact command, exit code, and logs.
+
+Practical examples:
+
+- If you want the current premarket report before the market opens, use `Latest trading session` + `Premarket`.
+- If you want to regenerate a report for `2026-04-10`, use `Specified historical trading day`, pick `2026-04-10`, then choose `Premarket` or `AfterClose`.
+- If you accidentally switch to historical mode while `Intraday` was selected, the GUI automatically moves you back to a valid historical mode.
+
+### 1.5 Import trades, cash adjustments, and recent reports
+
+These three panels live under the report form in the same left rail, and together they cover most routine maintenance work.
+
+**Import Trades**
 
 <p>
-  <img src="docs/images/gui-config.png" alt="GUI Config tab showing Runtime Config sections such as ledger paths, execution costs, portfolio buckets, and trading calendar settings" width="980">
+  <img src="docs/images/gui-import-trades-current.png" alt="Import Trades panel showing the Capital XLS path, import mode, ET date range, and import button" width="420">
+</p>
+
+1. Paste a local `OSHistoryDealAll.xls` path, or click `Browse`.
+2. Choose `replace` for a full rebuild from broker history, or `append` for incremental imports.
+3. Optionally bound the import with `Trade Date From (ET)` and `Trade Date To (ET)`.
+4. Click `Import Trades`.
+5. Inspect `Status` first, then return to `Report` to confirm the refreshed output.
+
+**Cash Adjustment**
+
+<p>
+  <img src="docs/images/gui-cash-adjustment-current.png" alt="Cash Adjustment panel showing the signed USD amount field, note field, and apply button" width="420">
+</p>
+
+1. Enter a signed USD amount in `Amount (USD)`.
+2. Use negative values for withdrawals and positive values for deposits.
+3. Add a short single-line note, for example `capital withdrawal` or `manual deposit`.
+4. Click `Apply Cash Adjustment`.
+
+**Recent Reports**
+
+1. Click a report row to load it into the viewer.
+2. Use the checkbox beside each row when you want to delete multiple generated reports.
+3. `Select All` becomes `Deselect All` when every visible report is selected.
+4. `Delete All Selects` removes the selected markdown reports and their matching JSON artifacts.
+
+### 1.6 Config tab
+
+The `Config` tab is intended to replace direct `config.json` editing for routine changes. It preserves the existing backend structure, but exposes it as grouped forms so the most frequently adjusted parameters can be edited safely from the desktop app.
+
+<p>
+  <img src="docs/images/gui-config-current.png" alt="Config tab showing runtime config groups and the signal config area in the current desktop GUI" width="980">
 </p>
 
 The `Config` tab currently covers:
@@ -108,20 +189,27 @@ The `Config` tab currently covers:
 - numeric precision and trade-render policy
 - tactical indicator selection in the `Signal Config` section
 
-### 1.5 Reload and close the GUI
+Recommended usage:
 
-The Electron app also exposes app controls directly in the upper-left card:
+1. Open `Config`.
+2. Edit the relevant grouped fields instead of editing raw JSON by hand.
+3. Click `Save Runtime Config` or `Save Signal Config`.
+4. Review the `Status` tab if the save fails, or return to `Report` if you want to inspect the refreshed output.
+
+### 1.7 Reload and close the GUI
+
+The app-level controls are exposed in the upper-left hero card:
 
 <p>
-  <img src="docs/images/gui-server-controls.png" alt="GUI control card with Reload and Close buttons" width="420">
+  <img src="docs/images/gui-controls-current.png" alt="Current hero card with Reload and Close actions in the Electron desktop GUI" width="460">
 </p>
 
 Use them as follows:
 
-- `Reload`: restart the full Electron desktop app and reconnect the current session. Use this after frontend or backend code changes when you want the app to pick up the latest code without re-running `python3 gui_app.py`.
+- `Reload`: restart the Electron desktop app and reconnect the session. Use this after frontend or backend code changes when you want the app to rebuild and reopen without manually re-running `python3 gui_app.py`.
 - `Close`: exit the desktop app completely.
 
-### 1.6 Current GUI limitations
+### 1.8 Current GUI limitations
 
 The current GUI is intentionally focused on routine workflows. A few tasks are still better handled from the CLI:
 
@@ -130,15 +218,16 @@ The current GUI is intentionally focused on routine workflows. A few tasks are s
 - broker reconciliation arguments such as `--broker-investment-total-usd` are still CLI-first
 - the GUI operates on the same local `config.json`, `states.json`, `trades.json`, `data/`, and `report/` files as the CLI
 
-### 1.7 Recommended daily usage flow
+### 1.9 Recommended daily usage flow
 
 For routine use, the intended order is:
 
 1. Start the GUI.
-2. Review the auto-loaded latest report, or switch to another one from `Recent Reports`.
-3. Run `Premarket`, `Intraday`, or `AfterClose` as needed.
-4. If you imported new broker trades, use `Import Trades` and let the GUI regenerate the current report automatically.
-5. Review the result in `Report` and check `Status` if anything looks abnormal.
+2. Let the auto-loaded latest report open, or switch to another report from `Recent Reports`.
+3. Use `Generate Report` for the latest trading session or for a specific historical trading day.
+4. If you imported new broker trades, use `Import Trades` and let the GUI regenerate the selected report automatically.
+5. If you recorded a deposit or withdrawal, confirm the result in `Status`, then inspect the refreshed report.
+6. Use `Config` only when you need to change runtime behavior, calendar data, precision, or tactical signal settings.
 
 ------
 
