@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from gui.desktop_backend import DesktopSessionState, GuiDesktopBackend
+from gui.desktop_backend import GuiDesktopBackend
 from gui.services import OperationResult
 
 

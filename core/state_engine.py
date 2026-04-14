@@ -12,28 +12,18 @@ from core.models import CashEventRecord, ImportResult
 from core.report_bundle import build_report_root, ensure_report_root_fields
 from core.report_context import (
     _ensure_trading_calendar,
-    _next_trading_day_et_from_states,
     _parse_broker_asof,
-    _prev_trading_day_et_from_states,
-    _report_date_from_meta,
     _report_meta_from_context,
-    _report_meta_from_mode_dates,
-    _report_meta_from_report_date,
     _resolve_report_context,
-    _resolve_runtime_report_meta,
 )
 from core.report_output import (
     _build_report_json_output_path,
-    _build_report_output,
-    _build_report_output_path,
     _render_report_output,
 )
-from core.report_meta import _effective_report_meta, _migrate_state_schema, _normalize_mode_key
+from core.report_meta import _migrate_state_schema
 from core.reconciliation import (
     _find_trade_conflicts,
-    _first_token_ticker,
     _normalize_trades_inplace,
-    _num_from_cell,
     _trade_buy_total_cost_usd,
     _upsert_trades,
     _verify_holdings_with_broker_investment_total,
@@ -49,7 +39,6 @@ from core.runtime_io import (
     _market_history_rows_map,
     _round_selected_numeric_fields,
     _runtime_config,
-    _runtime_data_config,
     _runtime_history,
     _runtime_numeric_precision,
     _runtime_report_meta,
@@ -57,16 +46,12 @@ from core.runtime_io import (
     _save_cash_events_payload,
     _save_json,
     _save_trades_payload,
-    _strip_persisted_report_transients,
 )
 from core.strategy import (
-    _dedupe_by_date_keep_last,
-    _fmt_usd,
-    _normalize_ma_rule,
     _parse_indicator_window,
     _read_ohlcv_csv,
 )
-from core.tactical_engine import apply_tactical_plan, compute_tactical_plan
+from core.tactical_engine import compute_tactical_plan
 from core.trade_imports import (
     _iter_imported_trade_batches,
     _normalize_trade_date_bounds,
@@ -80,7 +65,6 @@ from utils.config_access import (
     config_fx_pairs,
     config_tactical_indicators,
     config_trades_file,
-    config_trading_calendar,
     discover_state_engine_tickers,
 )
 from utils.dates import (
@@ -88,12 +72,10 @@ from utils.dates import (
     _normalize_time_tw,
     _normalize_trade_date_et,
     _parse_ymd_loose,
-    _to_yyyy_mm_dd,
     _trade_time_tw_to_et_dt,
 )
-from utils.parsers import _safe_float, _safe_int
+from utils.parsers import _safe_float
 from utils.precision import format_fixed, round_with_precision, state_engine_numeric_precision
-from utils.trading_calendar import is_weekend_et as _is_weekend_et
 
 def _positions_need_trade_hydration(states: Dict[str, Any]) -> bool:
     positions = (((states.get('portfolio') or {}).get('positions')) or [])
@@ -856,7 +838,7 @@ def _update_portfolio_performance(states: Dict[str, Any], cash_events: List[Dict
     portfolio = states.setdefault('portfolio', {})
     totals = portfolio.setdefault('totals', {})
     perf = portfolio.setdefault('performance', {})
-    cash = portfolio.setdefault('cash', {'usd': 0.0})
+    portfolio.setdefault('cash', {'usd': 0.0})
     baseline = perf.setdefault('baseline', {})
     returns = perf.setdefault('returns', {})
     current_total_assets = float((totals.get('portfolio') or {}).get('nav_usd') or 0.0)
@@ -1349,10 +1331,8 @@ def _run_main(args: argparse.Namespace) -> int:
         broker_asof_et = resolved_ctx.broker_asof_et
         broker_asof_et_dt = None
         snapshot_kind = resolved_ctx.snapshot_kind
-        broker_asof_et_datetime = resolved_ctx.broker_asof_et_datetime or None
     else:
         broker_asof_et, broker_asof_et_dt, snapshot_kind = _parse_broker_asof(states, str(args.broker_asof_et or ''), str(args.broker_asof_et_time or ''), str(args.broker_asof_et_datetime or ''), mode='')
-        broker_asof_et_datetime = str(args.broker_asof_et_datetime or '').strip() or None
     if args.initial_investment_usd is not None:
         _set_initial_investment_usd(states, float(args.initial_investment_usd), usd_amount_ndigits=int(numeric_precision["usd_amount"]))
     cash_event_date_et = str(broker_asof_et or now_et.strftime('%Y-%m-%d')).strip()
@@ -1364,9 +1344,6 @@ def _run_main(args: argparse.Namespace) -> int:
         _clear_holdings_reconciliation_snapshot(states)
         print('[INFO] holdings reconciliation skipped: no --broker-investment-total-usd supplied.')
     _update_tactical_cash_from_trades_and_snapshot(states, trades, tactical_cash_usd=tactical_cash_usd, broker_asof_et=broker_asof_et if broker_asof_et else None, usd_amount_ndigits=int(numeric_precision["usd_amount"]), verify_tolerance_usd=float(args.verify_tolerance_usd), cutoff_et_dt=broker_asof_et_dt if snapshot_kind == 'intraday' else None, snapshot_kind=snapshot_kind)
-    cash_block = (states.get('portfolio', {}) or {}).get('cash', {}) or {}
-    rec = cash_block.get('last_reconciled_with_broker_cash') or {}
-    rec_status = str(rec.get('status') or 'N/A') if tactical_cash_usd is not None else 'SKIP'
     if args.cash_transfer_to_reserve_usd is not None:
         try:
             _apply_cash_transfer_to_reserve(states, cash_events, amount_usd=float(args.cash_transfer_to_reserve_usd), usd_amount_ndigits=int(numeric_precision["usd_amount"]), asof_et=cash_event_date_et)

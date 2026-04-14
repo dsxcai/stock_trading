@@ -4,7 +4,7 @@ import argparse
 import datetime as dt
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import pandas as pd
 
