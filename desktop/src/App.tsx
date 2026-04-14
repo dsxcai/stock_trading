@@ -688,25 +688,25 @@ export default function App() {
               <p>Import Capital XLS history, then regenerate the currently selected report.</p>
             </div>
             <form className="stack" onSubmit={handleImportTrades}>
-              <label>
-                Capital XLS Path
-                <input
-                  type="text"
-                  value={importForm.capital_xls_path}
-                  placeholder="/path/to/OSHistoryDealAll.xls"
-                  onChange={(event) =>
-                    setImportForm((current) => ({
-                      ...current,
-                      capital_xls_path: event.target.value,
-                    }))
-                  }
-                />
+              <label className="field-with-action">
+                <span>Capital XLS Path</span>
+                <div className="input-action-row">
+                  <input
+                    type="text"
+                    value={importForm.capital_xls_path}
+                    placeholder="/path/to/OSHistoryDealAll.xls"
+                    onChange={(event) =>
+                      setImportForm((current) => ({
+                        ...current,
+                        capital_xls_path: event.target.value,
+                      }))
+                    }
+                  />
+                  <button type="button" className="secondary-button" onClick={handleBrowseCapitalXls} disabled={!!busyMessage}>
+                    Browse
+                  </button>
+                </div>
               </label>
-              <div className="inline-actions">
-                <button type="button" className="secondary-button" onClick={handleBrowseCapitalXls} disabled={!!busyMessage}>
-                  Browse
-                </button>
-              </div>
               <label>
                 Import Mode
                 <select

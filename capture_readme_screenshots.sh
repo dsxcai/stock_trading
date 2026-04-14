@@ -14,4 +14,4 @@ export PYTHON="${PYTHON:-$(command -v python3)}"
 unset ELECTRON_RUN_AS_NODE || true
 
 npm run build
-npm run capture:docs
+./node_modules/.bin/electron ../utils/capture_gui_screenshots.js

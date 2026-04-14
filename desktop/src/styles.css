@@ -198,6 +198,22 @@ pre {
   margin-top: 18px;
 }
 
+.field-with-action {
+  display: grid;
+  gap: 8px;
+}
+
+.input-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.input-action-row button {
+  white-space: nowrap;
+}
+
 .hero-actions button,
 .inline-actions button,
 .rail-panel button,
@@ -695,6 +711,10 @@ pre {
   }
 
   .signal-row {
+    grid-template-columns: 1fr;
+  }
+
+  .input-action-row {
     grid-template-columns: 1fr;
   }
 }

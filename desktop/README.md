@@ -36,12 +36,6 @@ npm start
 
 This root-level command installs desktop dependencies if needed, rebuilds the current desktop bundle, then launches Electron in a hidden window and refreshes the GUI screenshots under `../docs/images/`.
 
-If you only want the raw capture step from inside `desktop/`, you can still run:
-
-```bash
-npm run capture:docs
-```
-
 The capture flow is implemented in [capture_gui_screenshots.js](/Users/sht/Stock_Work/stock_trading/utils/capture_gui_screenshots.js).
 
 ## Notes

@@ -1,13 +1,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { createRequire } = require("node:module");
 const { spawn } = require("node:child_process");
-
-const { app, BrowserWindow, ipcMain } = require("electron");
-
-app.disableHardwareAcceleration();
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const DESKTOP_ROOT = path.join(REPO_ROOT, "desktop");
+const desktopRequire = createRequire(path.join(DESKTOP_ROOT, "package.json"));
+const { app, BrowserWindow, ipcMain } = desktopRequire("electron");
 const PRELOAD_PATH = path.join(DESKTOP_ROOT, "dist-electron", "preload.js");
 const RENDERER_INDEX_PATH = path.join(DESKTOP_ROOT, "dist", "index.html");
 const PYTHON_BRIDGE_PATH = path.join(REPO_ROOT, "gui_ipc.py");
@@ -16,6 +15,8 @@ const WINDOW_WIDTH = 1440;
 const WINDOW_HEIGHT = 960;
 const PANEL_PADDING = 18;
 const AFTER_ACTION_DELAY_MS = 350;
+
+app.disableHardwareAcceleration();
 
 const desktopSession = {
   lastResult: null,

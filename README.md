@@ -97,7 +97,7 @@ Read it as follows:
   - `Status`: the latest command result and captured logs
   - `Config`: structured runtime and signal configuration forms
 
-For quick orientation:
+  For quick orientation:
 
 | Area | What it is for |
 | --- | --- |
@@ -776,7 +776,7 @@ Period and capital parameters:
   - if omitted, defaults to the last date in the shared trading calendar
   - if the date range falls outside the shared trading calendar, or if there are not enough warm-up trading days before `start-date`, the program fails directly rather than auto-shrinking the window
 
-Output files:
+  Output files:
 
 - `summary.json`
 - `equity_curve.csv`
