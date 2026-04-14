@@ -99,7 +99,7 @@ def compute_tactical_plan(
 
     def tactical_shares(ticker: str) -> int:
         for position in positions:
-            if position.get("ticker") == ticker and position.get("bucket") == "tactical":
+            if position.get("ticker") == ticker and position.get("bucket") in {"tactical", "tactical_cash_pool"}:
                 return int(position.get("shares") or 0)
         return 0
 
