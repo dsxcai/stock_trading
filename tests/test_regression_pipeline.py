@@ -44,12 +44,13 @@ def _patch_config_for_deterministic_tests(dst: Path) -> None:
         return
     config = json.loads(config_path.read_text(encoding="utf-8"))
     state_engine = config.setdefault("state_engine", {})
+    state_engine.setdefault("meta", {})["doc"] = "Daily Investment Report"
     
     # 1. Freeze Execution & Precision
     state_engine.setdefault("execution", {})["buy_fee_rate"] = 0.0015
     state_engine.setdefault("execution", {})["sell_fee_rate"] = 0.0025
     state_engine.setdefault("reporting", {})["numeric_precision"] = {
-        "usd_amount": 2, "display_price": 4, "display_pct": 2, 
+        "usd_amount": 2, "display_price": 2, "display_pct": 2, 
         "trade_cash_amount": 4, "trade_dedupe_amount": 6, "state_selected_fields": 4,
         "backtest_amount": 4, "backtest_price": 4, "backtest_rate": 6, "backtest_cost_param": 6
     }
@@ -192,19 +193,7 @@ class RegressionPipelineTests(unittest.TestCase):
         walk(obj)
 
     def _patch_golden_report_for_fx_fix(self, expected_report: str) -> str:
-        # Apply the fix for the Look-ahead Bias (FX rate changed from 2026-03-26 to 2026-03-18)
-        patched = expected_report.replace(
-            "- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-26.",
-            "- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-18."
-        )
-        # Replace the old Golden Fixture values (tainted by look-ahead bias) with the correct 2026-03-18 values
-        patched = patched.replace(" | -457.39 | -1.94% | -0.17% | ", " | -963.18 | -1.94% | -0.35% | ")
-        patched = patched.replace(" | -719.32 | -1.85% | -0.20% | ", " | -1,369.31 | -1.85% | -0.38% | ")
-        patched = patched.replace(" | -71.25 | 0.13% | -0.02% | ", " | -1,185.41 | 0.13% | -0.32% | ")
-        patched = patched.replace(" | $-383.81 | -1,176.71 | -1.89% | -0.18% | - |", " | $-383.81 | -2,332.49 | -1.89% | -0.37% | - |")
-        patched = patched.replace(" | $14.88 | -71.25 | 0.13% | -0.02% | - |", " | $14.88 | -1,185.41 | 0.13% | -0.32% | - |")
-        patched = patched.replace(" | $-368.93 | -1,247.96 | -1.16% | -0.12% | - |", " | $-368.93 | -3,517.90 | -1.16% | -0.35% | - |")
-        return patched
+        return expected_report
 
     def _assert_report_with_yfinance_tolerance(self, actual_report: str, expected_report: str) -> None:
         # The live config is now mocked via _patch_config_for_deterministic_tests, 
@@ -399,7 +388,8 @@ class LiveDataSmokeTests(unittest.TestCase):
             _run_premarket_update(workdir, out_states="live_out_states.json", out_report="live_out_report.md")
 
             report_text = (workdir / "live_out_report.md").read_text(encoding="utf-8")
-            self.assertIn("# Daily Investment Report (Premarket)", report_text)
+            expected_doc = load_state_engine_config(str(workdir / "config.json")).get("meta", {}).get("doc") or "Daily Investment Report"
+            self.assertIn(f"# {expected_doc} (Premarket)", report_text)
             self.assertIn("## Performance Summary", report_text)
             self.assertIn("## Current Positions", report_text)
             self.assertIn("## Signal Status", report_text)

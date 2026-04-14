@@ -138,6 +138,11 @@ class ReportBundleTests(unittest.TestCase):
                 {"trade_id": 2, "ticker": "AAA", "trade_date_et": "2026-03-06", "time_tw": "2026/03/06 22:00:00", "side": "BUY", "shares": 2, "cash_amount": 240.0, "notes": "second lot"},
                 {"trade_id": 3, "ticker": "AAA", "trade_date_et": "2026-03-10", "time_tw": "2026/03/10 21:00:00", "side": "SELL", "shares": 1, "cash_amount": 130.0, "notes": "sell"},
             ],
+            report_meta={
+                "mode": "Premarket",
+                "mode_key": "premarket",
+                "execution_basis": {"t_plus_1_et": "2026-03-06", "basis": "NYSE Trading Day"},
+            },
             market_history={
                 "TWD=X": {
                     "rows": [
@@ -151,10 +156,10 @@ class ReportBundleTests(unittest.TestCase):
 
         position = report_root["portfolio"]["positions"][0]
         self.assertEqual(position["notes"], "second lot x2")
-        self.assertAlmostEqual(position["unrealized_pnl_twd"], (300.0 * 34.0) - (240.0 * 33.0))
-        self.assertAlmostEqual(position["unrealized_pnl_twd_pct"], (300.0 * 34.0 - 240.0 * 33.0) / (240.0 * 33.0))
-        self.assertAlmostEqual(report_root["portfolio"]["totals"]["tactical"]["unrealized_pnl_twd"], (300.0 * 34.0) - (240.0 * 33.0))
-        self.assertAlmostEqual(report_root["portfolio"]["totals"]["portfolio"]["unrealized_pnl_twd"], (300.0 * 34.0) - (240.0 * 33.0))
+        self.assertAlmostEqual(position["unrealized_pnl_twd"], (300.0 * 33.0) - (240.0 * 33.0))
+        self.assertAlmostEqual(position["unrealized_pnl_twd_pct"], (300.0 * 33.0 - 240.0 * 33.0) / (240.0 * 33.0))
+        self.assertAlmostEqual(report_root["portfolio"]["totals"]["tactical"]["unrealized_pnl_twd"], (300.0 * 33.0) - (240.0 * 33.0))
+        self.assertAlmostEqual(report_root["portfolio"]["totals"]["portfolio"]["unrealized_pnl_twd"], (300.0 * 33.0) - (240.0 * 33.0))
 
     def test_build_report_root_marks_intraday_same_day_prices_as_estimated(self) -> None:
         states = {
@@ -212,6 +217,7 @@ class ReportBundleTests(unittest.TestCase):
                 "mode": "Premarket",
                 "mode_key": "premarket",
                 "signal_basis": {"t_et": "2026-03-17", "basis": "NYSE Close"},
+                "execution_basis": {"t_plus_1_et": "2026-03-18", "basis": "NYSE Trading Day"},
             },
             market_history={
                 "TWD=X": {
@@ -226,7 +232,7 @@ class ReportBundleTests(unittest.TestCase):
         price_notes = (report_root.get("_report_meta") or {}).get("price_notes") or []
         self.assertEqual(
             price_notes,
-            ["Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-24."],
+            ["Estimated Price: Premarket Unrealized PnL (TWD) uses the TWD=X CSV quote on or before report date 2026-03-18 (selected 2026-03-17)."],
         )
 
     def test_build_report_root_filters_unrenderable_rows_and_keeps_cash_pool_signal_row(self) -> None:

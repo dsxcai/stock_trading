@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core import reporting
 from core import state_engine
+from core.runtime_io import _strip_persisted_report_transients
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -273,7 +274,7 @@ class ReportingSafetyTests(unittest.TestCase):
             "market": {"signals_inputs": {}, "next_close_threshold_inputs": {}},
         }
 
-        state_engine._strip_persisted_report_transients(states)
+        _strip_persisted_report_transients(states)
 
         self.assertNotIn("by_mode", states)
         self.assertNotIn("signals", states)

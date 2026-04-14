@@ -2,7 +2,7 @@
 - Generated At (ET): 2026/03/18 08:00:00
 - Signal Basis: t=2026-03-17 (NYSE Close)
 - Execution Basis: t+1=2026-03-18 (NYSE Trading Day)
-- Estimated Price: Premarket Unrealized PnL (TWD) uses the latest TWD=X CSV quote from 2026-03-26.
+- Estimated Price: Premarket Unrealized PnL (TWD) uses the TWD=X CSV quote from report date 2026-03-18.
 - Nearby Trading Calendar: 2026-03-17 Open; 2026-03-18 Open; 2026-03-19 Open.
 
 ## Performance Summary
@@ -22,13 +22,13 @@ Note: Cumulative Profit = since-inception total PnL (realized + unrealized). Cum
 ## Current Positions
 | Bucket | Ticker | Shares | Cost (USD) | Price (Now) | Market Value (USD) | Unrealized PnL (USD) | Unrealized PnL (TWD) | Unrealized PnL % | Unrealized PnL % (TWD) | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Core | ARKQ | 70 | $8,698.20 | 121.8500 | $8,529.50 | $-168.70 | -457.39 | -1.94% | -0.17% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
-| Core | SPY | 17 | $11,618.54 | 670.7900 | $11,403.43 | $-215.11 | -719.32 | -1.85% | -0.20% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
-| Tactical | SMH | 29 | $11,494.64 | 396.8800 | $11,509.52 | $14.88 | -71.25 | 0.13% | -0.02% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
-| Core Subtotal | - | - | $20,316.74 | - | $19,932.93 | $-383.81 | -1,176.71 | -1.89% | -0.18% | - |
-| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,509.52 | $14.88 | -71.25 | 0.13% | -0.02% | - |
+| Core | ARKQ | 70 | $8,698.20 | 121.8500 | $8,529.50 | $-168.70 | -943.57 | -1.94% | -0.35% | Imported from Capital XLS (ARKQ ARKQUS) x70 |
+| Core | SPY | 17 | $11,618.54 | 670.7900 | $11,403.43 | $-215.11 | -1,369.31 | -1.85% | -0.38% | Imported from Capital XLS (SPY SPDR標普500ETF) x17 |
+| Tactical | SMH | 29 | $11,494.64 | 396.8800 | $11,509.52 | $14.88 | -727.30 | 0.13% | -0.20% | Imported from Capital XLS (SMH VanEck半導體ETF) x29 |
+| Core Subtotal | - | - | $20,316.74 | - | $19,932.93 | $-383.81 | -2,312.89 | -1.89% | -0.36% | - |
+| Tactical Subtotal (incl. Cash Pool) | - | - | $11,494.64 | - | $11,509.52 | $14.88 | -727.30 | 0.13% | -0.20% | - |
 | Cash Pool | - | - | - | - | $73.35 | - | - | - | - | - |
-| Portfolio Total | - | - | $31,811.38 | - | $31,515.80 | $-368.93 | -1,247.96 | -1.16% | -0.12% | - |
+| Portfolio Total | - | - | $31,811.38 | - | $31,515.80 | $-368.93 | -3,040.18 | -1.16% | -0.30% | - |
 
 Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the current price.
 
@@ -51,6 +51,7 @@ Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the c
 | AMZN | SMA50 | $10,901.86 | 212.6500 | 222.4869 | 222.4869 | 222.49+ |
 | GOOG | SMA50 | $15,627.97 | 308.4200 | 318.9382 | 318.9382 | 318.94+ |
 | INDA | SMA100 | $5,251.08 | 49.2700 | 53.0412 | 53.0412 | 53.04+ |
+| META | SMA50 | $31,993.88 | 654.8600 | 652.9363 | 654.8600 | 654.86+ |
 | MSFT | SMA50 | $20,837.92 | 404.8800 | 425.2637 | 425.2637 | 425.26+ |
 | NVDA | SMA50 | $9,074.71 | 186.0300 | 185.1982 | 186.0300 | 186.03+ |
 | SMH | SMA100 | $37,379.72 | 401.0300 | 377.5729 | 401.0300 | 401.03+ |

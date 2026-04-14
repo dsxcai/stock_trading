@@ -258,6 +258,39 @@ def _latest_row_date(rows: List[Dict[str, Any]]) -> str:
     return ""
 
 
+def _report_case_day(report_meta: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(report_meta, dict):
+        return ""
+    candidates = (
+        report_meta.get("report_date"),
+        report_meta.get("version_anchor_et"),
+        ((report_meta.get("execution_basis") or {}).get("t_plus_1_et")),
+        ((report_meta.get("signal_basis") or {}).get("t_et")),
+    )
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _row_on_or_before(rows: List[Dict[str, Any]], target_date: str) -> Optional[Dict[str, Any]]:
+    target = str(target_date or "").strip()
+    if not rows:
+        return None
+    if not target:
+        return rows[-1]
+    candidate: Optional[Dict[str, Any]] = None
+    for row in rows:
+        row_date = str((row or {}).get("Date") or "").strip()
+        if not row_date:
+            continue
+        if row_date > target:
+            break
+        candidate = row
+    return candidate
+
+
 def _report_active_tickers(states: Dict[str, Any], config: Optional[Dict[str, Any]]) -> List[str]:
     tickers: List[str] = []
     seen: set[str] = set()
@@ -309,8 +342,11 @@ def _estimated_price_notes(
             )
     if mode_key == "premarket" and signal_day and fx_ticker:
         fx_rows = list(((market_history.get(fx_ticker) or {}).get("rows")) or [])
+        report_case_day = _report_case_day(report_meta)
         latest_fx_date = _latest_row_date(fx_rows)
-        if latest_fx_date and latest_fx_date > signal_day:
+        selected_fx_row = _row_on_or_before(fx_rows, report_case_day)
+        selected_fx_date = str((selected_fx_row or {}).get("Date") or "").strip()
+        if latest_fx_date and report_case_day and latest_fx_date > report_case_day and selected_fx_date:
             positions = ((states.get("portfolio") or {}).get("positions")) or []
             has_open_position = False
             for position in positions:
@@ -324,10 +360,17 @@ def _estimated_price_notes(
                     has_open_position = True
                     break
             if has_open_position:
-                notes.append(
-                    "Estimated Price: Premarket Unrealized PnL (TWD) uses the latest "
-                    f"{fx_ticker} CSV quote from {latest_fx_date}."
-                )
+                if selected_fx_date == report_case_day:
+                    notes.append(
+                        "Estimated Price: Premarket Unrealized PnL (TWD) uses the "
+                        f"{fx_ticker} CSV quote from report date {report_case_day}."
+                    )
+                else:
+                    notes.append(
+                        "Estimated Price: Premarket Unrealized PnL (TWD) uses the "
+                        f"{fx_ticker} CSV quote on or before report date {report_case_day} "
+                        f"(selected {selected_fx_date})."
+                    )
     return notes
 
 
@@ -366,8 +409,10 @@ def _position_twd_metrics(
     position: Dict[str, Any],
     lots: List[Dict[str, Any]],
     fx_rows: List[Dict[str, Any]],
+    report_meta: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, float]]:
-    current_fx = _latest_close(fx_rows)
+    current_fx_row = _row_on_or_before(fx_rows, _report_case_day(report_meta))
+    current_fx = _float_or_none((current_fx_row or {}).get("Close"))
     if current_fx is None:
         return None
     try:
@@ -487,6 +532,7 @@ def build_report_root(
                         position,
                         open_lots_by_ticker.get(ticker, []),
                         fx_rows,
+                        report_meta,
                     )
                     if metrics is not None:
                         position["unrealized_pnl_twd"] = metrics["unrealized_pnl_twd"]

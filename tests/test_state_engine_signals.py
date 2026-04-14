@@ -10,7 +10,7 @@ from unittest import mock
 
 from core import state_engine
 from core.models import ReportContext, TacticalPlan
-from core.tactical_engine import compute_tactical_plan
+from core.tactical_engine import apply_tactical_plan, compute_tactical_plan
 
 
 def _numeric_precision() -> dict:
@@ -73,7 +73,7 @@ class StateEngineSignalTests(unittest.TestCase):
             mode="Premarket",
             trades=list(states.get("trades") or []),
         )
-        state_engine.apply_tactical_plan(states, plan)
+        apply_tactical_plan(states, plan)
 
     def test_sell_signal_with_recent_buy_executes_sell_all(self) -> None:
         states = {
