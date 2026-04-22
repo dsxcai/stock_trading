@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import logging
+import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -99,6 +100,41 @@ def _normalize_history_frame(
     return normalized
 
 
+def _zip_output_dir(output_dir: Path, end_date: dt.date, logger: logging.Logger) -> Path:
+    """Zip all files in output_dir into {stamp_date}.zip (no directory paths, like zip -j).
+
+    The stamp date is taken from the last data row of GOOG.csv when present;
+    otherwise end_date is used as fallback — matching the get_rec.sh behaviour.
+    """
+    stamp_date = end_date
+    goog_csv = output_dir / "GOOG.csv"
+    if goog_csv.is_file():
+        try:
+            last_line = ""
+            with goog_csv.open() as fh:
+                for line in fh:
+                    stripped = line.strip()
+                    if stripped:
+                        last_line = stripped
+            if last_line:
+                candidate = last_line.split(",")[0].strip()
+                stamp_date = dt.date.fromisoformat(candidate)
+        except Exception as exc:
+            logger.warning(f"Could not read stamp date from GOOG.csv: {exc}; using end_date={end_date}")
+
+    data_files = sorted(f for f in output_dir.iterdir() if f.is_file())
+    if not data_files:
+        raise SystemExit(f"No files found under {output_dir}/. Nothing to zip.")
+
+    zip_path = Path(f"{stamp_date}.zip")
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in data_files:
+            zf.write(f, arcname=f.name)
+
+    logger.info(f"[ZIP] wrote {zip_path} ({len(data_files)} files)")
+    return zip_path
+
+
 def download_history(
     ticker: str,
     start: dt.date,
@@ -139,8 +175,12 @@ def main() -> None:
     parser.add_argument("--output-dir", "--outdir", dest="output_dir", default="data")
     parser.add_argument("--start")
     parser.add_argument("--end", default="")
+    parser.add_argument("--days-back", dest="days_back", type=int, default=None,
+                        help="Set start date to N days ago (overrides --start). get_rec.sh used 1200.")
     parser.add_argument("--tickers", default="")
     parser.add_argument("--allow-incomplete-csv-rows", action="store_true", help="Bypass incomplete OHLC rows from the download source by skipping them")
+    parser.add_argument("--zip", dest="zip_output", action="store_true",
+                        help="Zip all output files into {stamp_date}.zip after a successful download")
     parser.add_argument("--log-file", default="")
     args = parser.parse_args()
 
@@ -150,7 +190,12 @@ def main() -> None:
     log_run_header(logger, "download_1y.py", args)
 
     end_date = parse_date(args.end) if args.end else yesterday()
-    start_date = parse_date(args.start) if args.start else end_date - dt.timedelta(days=370)
+    if args.days_back is not None:
+        start_date = end_date - dt.timedelta(days=args.days_back)
+    elif args.start:
+        start_date = parse_date(args.start)
+    else:
+        start_date = end_date - dt.timedelta(days=370)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -179,6 +224,10 @@ def main() -> None:
 
     if failures:
         raise SystemExit(1)
+
+    if args.zip_output:
+        _zip_output_dir(output_dir, end_date, logger)
+
     logger.info(f"[LOG] complete file={log_path}")
 
 

@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog, and this project uses semantic versioning.
 
+## [Unreleased] - 2026-04-22
+
+### Added
+- `download_1y.py --zip`: 下載完成後自動把 `--output-dir` 內所有檔案壓縮成 `{stamp_date}.zip`，stamp date 優先從 `GOOG.csv` 最後一行日期取得，否則 fallback 為 `--end` 日期。取代 `get_rec.sh` 的 zip 步驟。
+- `download_1y.py --days-back N`: 將起始日設為 N 天前（優先於 `--start`）。`get_rec.sh` 固定傳入 1200，現在可直接透過此參數傳遞。
+
+### Removed
+- `get_rec.sh` 的功能已完全整合進 `download_1y.py`，腳本本身保留但不再需要依賴。等效替代指令：
+  ```
+  python3 download_1y.py --days-back 1200 --end $(date +%Y-%m-%d) --zip
+  ```
+
+### Documentation
+- `README.md` 新增 Section 18「Utility scripts」，說明 `download_1y.py` 的參數、使用時機，以及取代 `get_rec.sh` 的等效指令。
+- `README.md` Section 8.5 加入 cite，連結至 Section 18.1。
+
 ## [1.3] - 2026-04-14
 
 ### Breaking changes

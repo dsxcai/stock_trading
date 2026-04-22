@@ -684,7 +684,7 @@ python3 generate_report.py --states states.json --trades-file trades.json --sche
 Purpose: use an existing snapshot together with `data/*.csv` to compute the tactical plan on demand and generate the report for the specified mode.
 
 This command must explicitly include `--mode`.
-When `update_states.py` is run with `--mode`, it now attempts an automatic CSV refresh first. The refresh scope is limited to functionally active tickers: current holdings, strategy tickers, and configured FX pairs such as `TWD=X`. The mode update flow refreshes those active tickers every time and downloads CSV history through the current ET date. Mode semantics are enforced later when the report or state snapshot chooses which ET row to use. For example, `Premarket` still reads the prior NYSE close for equity pricing and signals, while `Intraday` can use the same-day row when available.
+When `update_states.py` is run with `--mode`, it now attempts an automatic CSV refresh first. The refresh scope is limited to functionally active tickers: current holdings, strategy tickers, and configured FX pairs such as `TWD=X`. The mode update flow refreshes those active tickers every time and downloads CSV history through the current ET date. Mode semantics are enforced later when the report or state snapshot chooses which ET row to use. For example, `Premarket` still reads the prior NYSE close for equity pricing and signals, while `Intraday` can use the same-day row when available. The underlying download logic is handled by `download_1y.py` — see [Section 18.1](#181-download_1ypy--historical-data-downloader) for advanced usage and manual invocation.
 If the input `states.json` is compact, the command reconstructs derived position fields such as bucket and FIFO cost basis from `trades.json` before loading CSV market data.
 If a downloaded or local CSV row has incomplete OHLC values, the command fails by default. Use `--allow-incomplete-csv-rows` only when you intentionally want to bypass that failure and skip incomplete rows.
 
@@ -1203,3 +1203,47 @@ An optional custom time anchor may also be specified:
   - Added / Changed / Fixed
   - whether a breaking change exists
   - which commands, fields, fixtures, and tests are affected
+
+------
+
+## 18. Utility scripts
+
+These scripts handle supporting operations that are normally invoked automatically by the main entry points. Direct invocation is only needed for maintenance tasks, bulk re-downloads, or archiving.
+
+### 18.1 `download_1y.py` — historical data downloader
+
+`download_1y.py` fetches daily OHLCV history from Yahoo Finance and writes one CSV per ticker into the output directory. Under normal operation this script is called automatically whenever `update_states.py` runs with `--mode`; you do not need to invoke it manually for day-to-day use.
+
+**When you might run it directly:**
+
+- Seeding a fresh `data/` directory before the first mode run
+- Re-downloading a wider date range than the automatic refresh covers
+- Archiving a snapshot of the current CSVs as a zip file
+
+**Basic usage**
+
+```bash
+python3 download_1y.py [options]
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--config PATH` | `config.json` | Config file used to derive the ticker list |
+| `--tickers A,B,C` | _(from config)_ | Override the ticker list |
+| `--output-dir PATH` | `data` | Directory to write CSV files |
+| `--start YYYY-MM-DD` | 370 days before end | Inclusive start date |
+| `--end YYYY-MM-DD` | yesterday | Inclusive end date |
+| `--days-back N` | — | Set start to N days ago; overrides `--start` |
+| `--zip` | off | Zip all output files into `{stamp_date}.zip` after a successful download |
+| `--allow-incomplete-csv-rows` | off | Skip rows with incomplete OHLC data instead of failing |
+| `--log-file PATH` | _(auto)_ | Override the log file path |
+
+**Replicating the old `get_rec.sh` behaviour**
+
+The shell script `get_rec.sh` (1 200-day range + zip) is now fully replaced by:
+
+```bash
+python3 download_1y.py --days-back 1200 --end $(date +%Y-%m-%d) --zip
+```
+
+The `--zip` flag reads the last date row of `GOOG.csv` to determine the archive name (`{stamp_date}.zip`), and falls back to `--end` if `GOOG.csv` is absent.
