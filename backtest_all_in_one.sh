@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Sheng-Hsin Tsai
+# SPDX-License-Identifier: MIT
+
 set -euo pipefail
 
 config_path="backtest_config.json"

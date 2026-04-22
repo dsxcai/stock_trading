@@ -1,7 +1,11 @@
+# Copyright (c) 2026 Sheng-Hsin Tsai
+# SPDX-License-Identifier: MIT
+
 from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -128,6 +132,10 @@ def _trade(trade_date_et: str, time_tw: str, ticker: str, side: str, shares: int
     }
 
 
+def _capital_import_command(xls_path: Path) -> list[str]:
+    return [sys.executable, "-m", "extensions.capital_xls_import", str(xls_path)]
+
+
 class CapitalXLSImportTests(unittest.TestCase):
     def test_parse_capital_xls_trades(self) -> None:
         ndigits = _trade_cash_amount_ndigits()
@@ -229,10 +237,8 @@ class CapitalXLSImportTests(unittest.TestCase):
             )
 
             first = subprocess.run(
-                [
-                    "bash",
-                    "update_xml.sh",
-                    str(xls_path),
+                _capital_import_command(xls_path)
+                + [
                     "--states",
                     str(states_path),
                     "--out",
@@ -250,10 +256,8 @@ class CapitalXLSImportTests(unittest.TestCase):
             self.assertEqual(len(json.loads(trades_path.read_text(encoding="utf-8"))), 2)
 
             second = subprocess.run(
-                [
-                    "bash",
-                    "update_xml.sh",
-                    str(xls_path),
+                _capital_import_command(xls_path)
+                + [
                     "--states",
                     str(states_path),
                     "--out",
@@ -290,10 +294,8 @@ class CapitalXLSImportTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [
-                    "bash",
-                    "update_xml.sh",
-                    str(xls_path),
+                _capital_import_command(xls_path)
+                + [
                     "--states",
                     str(states_path),
                     "--out",
@@ -333,10 +335,8 @@ class CapitalXLSImportTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [
-                    "bash",
-                    "update_xml.sh",
-                    str(xls_path),
+                _capital_import_command(xls_path)
+                + [
                     "--states",
                     str(states_path),
                     "--out",
@@ -375,10 +375,8 @@ class CapitalXLSImportTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [
-                    "bash",
-                    "update_xml.sh",
-                    str(xls_path),
+                _capital_import_command(xls_path)
+                + [
                     "--states",
                     str(states_path),
                     "--out",
@@ -424,10 +422,8 @@ class CapitalXLSImportTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [
-                    "bash",
-                    "update_xml.sh",
-                    str(xls_path),
+                _capital_import_command(xls_path)
+                + [
                     "--states",
                     str(states_path),
                     "--out",
@@ -478,10 +474,8 @@ class CapitalXLSImportTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [
-                    "bash",
-                    "update_xml.sh",
-                    str(xls_path),
+                _capital_import_command(xls_path)
+                + [
                     "--states",
                     str(states_path),
                     "--out",
@@ -535,10 +529,8 @@ class CapitalXLSImportTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [
-                    "bash",
-                    "update_xml.sh",
-                    str(xls_path),
+                _capital_import_command(xls_path)
+                + [
                     "--states",
                     str(states_path),
                     "--out",

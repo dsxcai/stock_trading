@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Sheng-Hsin Tsai
+ * SPDX-License-Identifier: MIT
+ */
+
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";

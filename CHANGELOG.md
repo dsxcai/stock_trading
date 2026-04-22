@@ -4,21 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog, and this project uses semantic versioning.
 
-## [Unreleased] - 2026-04-22
+## [Unreleased]
 
 ### Added
-- `download_1y.py --zip`: 下載完成後自動把 `--output-dir` 內所有檔案壓縮成 `{stamp_date}.zip`，stamp date 優先從 `GOOG.csv` 最後一行日期取得，否則 fallback 為 `--end` 日期。取代 `get_rec.sh` 的 zip 步驟。
-- `download_1y.py --days-back N`: 將起始日設為 N 天前（優先於 `--start`）。`get_rec.sh` 固定傳入 1200，現在可直接透過此參數傳遞。
+- None.
+
+### Changed
+- None.
+
+### Fixed
+- None.
+
+## [1.3.1] - 2026-04-22
+
+### Added
+- `download_1y.py --zip`: zip all files under `--output-dir` into `{stamp_date}.zip` after a successful download. The stamp date prefers the last row date in `GOOG.csv`, and falls back to `--end` when `GOOG.csv` is absent.
+- `download_1y.py --days-back N`: set the start date to `N` days ago, overriding `--start`. This covers the old fixed `1200`-day range used by `get_rec.sh`.
 
 ### Removed
-- `get_rec.sh` 的功能已完全整合進 `download_1y.py`，腳本本身保留但不再需要依賴。等效替代指令：
+- Removed obsolete daily workflow shell wrappers: `premarket.sh`, `intraday.sh`, `afterclose.sh`, `update_xml.sh`, `get_rec.sh`, and `zip_files.sh`.
+- `get_rec.sh` is now fully replaced by `download_1y.py`. Equivalent command:
   ```
   python3 download_1y.py --days-back 1200 --end $(date +%Y-%m-%d) --zip
   ```
 
 ### Documentation
-- `README.md` 新增 Section 18「Utility scripts」，說明 `download_1y.py` 的參數、使用時機，以及取代 `get_rec.sh` 的等效指令。
-- `README.md` Section 8.5 加入 cite，連結至 Section 18.1。
+- Reworked `README.md` around a GUI-first / direct-Python workflow and removed usage guidance for the deleted shell wrappers.
+- Added a cite in `README.md` Section 8.5 that points to Section 18.1.
 
 ## [1.3] - 2026-04-14
 

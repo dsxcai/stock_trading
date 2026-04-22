@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Sheng-Hsin Tsai
+ * SPDX-License-Identifier: MIT
+ */
+
 import { contextBridge, ipcRenderer } from "electron";
 
 const desktopApi = {

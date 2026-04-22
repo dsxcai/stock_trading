@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Sheng-Hsin Tsai
+ * SPDX-License-Identifier: MIT
+ */
+
 import { useEffect, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";

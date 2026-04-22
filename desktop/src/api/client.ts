@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Sheng-Hsin Tsai
+ * SPDX-License-Identifier: MIT
+ */
+
 import type { ApiStateResponse, DesktopShellConfig } from "@/types";
 
 export async function loadDesktopConfig(): Promise<DesktopShellConfig> {

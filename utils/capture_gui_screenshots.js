@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Sheng-Hsin Tsai
+ * SPDX-License-Identifier: MIT
+ */
+
 const fs = require("node:fs");
 const path = require("node:path");
 const { createRequire } = require("node:module");

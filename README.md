@@ -282,7 +282,7 @@ For a first-time bootstrap, do not use a partial XLS export. Use the full availa
 If you prefer the CLI, the equivalent bootstrap command is:
 
 ```bash
-./update_xml.sh /path/to/OSHistoryDealAll.xls \
+python3 -m extensions.capital_xls_import /path/to/OSHistoryDealAll.xls \
   --states states.json \
   --out states.json \
   --config config.json \
@@ -625,12 +625,14 @@ The report will then derive the corresponding runtime context directly rather th
 
 ------
 
-## 8. How to use the main CLI entry points
+## 8. How to use the main Python entry points
+
+For routine end-user operation, prefer the desktop GUI. The commands below remain useful for automation, debugging, or recovery when you want the direct Python entrypoints without the GUI.
 
 ### 8.1 Premarket
 
 ```bash
-./premarket.sh
+python3 update_states.py --states states.json --csv-dir data --derive-signals-inputs force --derive-threshold-inputs force --mode Premarket --render-report --report-schema report_spec.json --report-dir report
 ```
 
 Purpose: update the state before market open and generate the premarket report.
@@ -640,7 +642,7 @@ This entry point does not rewrite the primary `states.json`. It writes `report/<
 ### 8.2 Intraday
 
 ```bash
-./intraday.sh
+python3 update_states.py --states states.json --csv-dir data --derive-signals-inputs force --derive-threshold-inputs force --mode Intraday --render-report --report-schema report_spec.json --report-dir report
 ```
 
 Purpose: update the state during market hours and generate the intraday report.
@@ -650,7 +652,7 @@ This entry point does not rewrite the primary `states.json`. It writes `report/<
 ### 8.3 AfterClose
 
 ```bash
-./afterclose.sh
+python3 update_states.py --states states.json --csv-dir data --derive-signals-inputs force --derive-threshold-inputs force --mode AfterClose --render-report --report-schema report_spec.json --report-dir report
 ```
 
 Purpose: update the state after market close and generate the after-close report.
@@ -659,7 +661,7 @@ This entry point does not rewrite the primary `states.json`. It writes `report/<
 ### 8.4 Capital XLS extension import
 
 ```bash
-./update_xml.sh <capital-xls-path> [extra update_states args...]
+python3 -m extensions.capital_xls_import <capital-xls-path> [extra update_states args...]
 ```
 
 Purpose: run the Capital Securities importer extension, convert `OSHistoryDealAll.xls` into normalized trades JSON, and then call `update_states.py` to synchronize `trades.json` and `states.json`.
@@ -723,7 +725,7 @@ This script performs more than report generation alone. It will:
 3. output `summary`, `equity_curve`, and `trades`
 4. generate `report.md` at the end
 
-If `--out-dir` is not specified, the system automatically creates a timestamped directory.
+If `--out-dir` is not specified, the script automatically creates a timestamped directory.
 
 Backtest-specific parameters are grouped under `backtest_config.json.backtest`:
 
@@ -1059,10 +1061,12 @@ Logs should be reviewed first in situations such as the following:
 
 ## 14. Routine operation examples
 
+Routine end-user operation should go through the desktop GUI. The examples below show the equivalent direct commands for automation, debugging, or recovery.
+
 ### 14.1 Standard premarket update
 
 ```bash
-./premarket.sh
+python3 update_states.py --states states.json --csv-dir data --derive-signals-inputs force --derive-threshold-inputs force --mode Premarket --render-report --report-schema report_spec.json --report-dir report
 ```
 
 A routine daily update of this kind always includes `--mode`, and updates both the snapshot and the report for that mode.
@@ -1070,25 +1074,25 @@ A routine daily update of this kind always includes `--mode`, and updates both t
 ### 14.2 Premarket update and move USD 3,000 into reserve cash
 
 ```bash
-./premarket.sh --cash-transfer-to-reserve-usd 3000
+python3 update_states.py --states states.json --csv-dir data --derive-signals-inputs force --derive-threshold-inputs force --mode Premarket --render-report --report-schema report_spec.json --report-dir report --cash-transfer-to-reserve-usd 3000
 ```
 
 ### 14.3 Move USD 1,500 of reserve cash back into deployable cash
 
 ```bash
-./premarket.sh --cash-transfer-to-reserve-usd -1500
+python3 update_states.py --states states.json --csv-dir data --derive-signals-inputs force --derive-threshold-inputs force --mode Premarket --render-report --report-schema report_spec.json --report-dir report --cash-transfer-to-reserve-usd -1500
 ```
 
 ### 14.4 After-close update and reconcile broker total holdings
 
 ```bash
-./afterclose.sh --broker-investment-total-usd 40490.18
+python3 update_states.py --states states.json --csv-dir data --derive-signals-inputs force --derive-threshold-inputs force --mode AfterClose --render-report --report-schema report_spec.json --report-dir report --broker-investment-total-usd 40490.18
 ```
 
 ### 14.5 Import Capital XLS only, without `--mode`
 
 ```bash
-./update_xml.sh data/OSHistoryDealAll.xls
+python3 -m extensions.capital_xls_import data/OSHistoryDealAll.xls
 ```
 
 ### 14.6 Record an external deposit or withdrawal only, without `--mode`
@@ -1238,9 +1242,9 @@ python3 download_1y.py [options]
 | `--allow-incomplete-csv-rows` | off | Skip rows with incomplete OHLC data instead of failing |
 | `--log-file PATH` | _(auto)_ | Override the log file path |
 
-**Replicating the old `get_rec.sh` behaviour**
+**Replicating the old 1 200-day + zip workflow**
 
-The shell script `get_rec.sh` (1 200-day range + zip) is now fully replaced by:
+This legacy workflow is now fully replaced by:
 
 ```bash
 python3 download_1y.py --days-back 1200 --end $(date +%Y-%m-%d) --zip
