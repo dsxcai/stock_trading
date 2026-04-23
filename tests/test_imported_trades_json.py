@@ -10,14 +10,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from utils.precision import load_state_engine_numeric_precision
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
 
 def _trade_cash_amount_ndigits(config_path: Path | None = None) -> int:
-    resolved = config_path if config_path is not None else (REPO_ROOT / "config.json")
-    return int(load_state_engine_numeric_precision(str(resolved))["trade_cash_amount"])
+    return 4
 
 
 def _minimal_config(trade_cash_amount_ndigits: int, state_selected_fields_ndigits: int = 4) -> dict:
@@ -80,10 +78,14 @@ class ImportedTradesJsonTests(unittest.TestCase):
         *extra_args: str,
         check: bool,
     ) -> subprocess.CompletedProcess[str]:
+        # Default to the frozen test config so tests never read the live config.json.
+        # If extra_args contains "--config", argparse will use the last value (the caller's override).
+        base_config = ["--config", str(FIXTURES_DIR / "test_config.json")]
         return subprocess.run(
             [
                 sys.executable,
                 "update_states.py",
+                *base_config,
                 "--states",
                 str(states_path),
                 "--out",

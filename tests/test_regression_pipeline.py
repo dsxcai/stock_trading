@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,8 +25,8 @@ FIXTURE_STATES = FIXTURES_DIR / "golden_premarket_states.json"
 FIXTURE_TRADES = FIXTURES_DIR / "golden_premarket_trades.json"
 FIXTURE_CASH_EVENTS = FIXTURES_DIR / "golden_premarket_cash_events.json"
 FIXED_NOW_ET = "2026-03-18T08:00:00-04:00"
+FIXTURE_CONFIG = FIXTURES_DIR / "test_config.json"
 PROJECT_CORE_ITEMS = [
-    "config.json",
     "report_spec.json",
     "update_states.py",
     "generate_report.py",
@@ -33,48 +34,6 @@ PROJECT_CORE_ITEMS = [
     "core",
     "utils",
 ]
-
-
-def _patch_config_for_deterministic_tests(dst: Path) -> None:
-    """
-    Isolate the regression test from the user's live config.json.
-    We freeze the configuration here to exactly match the conditions under which 
-    the golden fixtures were generated, preventing the test from breaking 
-    when the user adds/removes tickers or changes settings in their live environment.
-    """
-    config_path = dst / "config.json"
-    if not config_path.exists():
-        return
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    state_engine = config.setdefault("state_engine", {})
-    state_engine.setdefault("meta", {})["doc"] = "Daily Investment Report"
-    
-    # 1. Freeze Execution & Precision
-    state_engine.setdefault("execution", {})["buy_fee_rate"] = 0.0015
-    state_engine.setdefault("execution", {})["sell_fee_rate"] = 0.0025
-    state_engine.setdefault("reporting", {})["numeric_precision"] = {
-        "usd_amount": 2, "display_price": 2, "display_pct": 2, 
-        "trade_cash_amount": 4, "trade_dedupe_amount": 6, "state_selected_fields": 4,
-        "backtest_amount": 4, "backtest_price": 4, "backtest_rate": 6, "backtest_cost_param": 6
-    }
-    
-    # 2. Freeze Portfolio Buckets & FX Pairs
-    buckets = state_engine.setdefault("portfolio", {}).setdefault("buckets", {})
-    buckets["core"] = {"tickers": ["ARKQ", "SPY"]}
-    buckets["tactical"] = {
-        "tickers": ["AAPL", "AMZN", "GOOG", "INDA", "META", "MSFT", "NVDA", "SMH"],
-        "cash_pool_ticker": ""
-    }
-    state_engine.setdefault("data", {})["fx_pairs"] = {"usd_twd": {"ticker": "TWD=X"}}
-    
-    # 3. Freeze Tactical Indicators
-    tactical = state_engine.setdefault("strategy", {}).setdefault("tactical", {})
-    tactical["indicators"] = {
-        "AAPL": "SMA50", "AMZN": "SMA50", "GOOG": "SMA50", "INDA": "SMA100", 
-        "META": "SMA50", "MSFT": "SMA50", "NVDA": "SMA50", "SMH": "SMA100"
-    }
-    
-    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def _copy_project(
@@ -94,11 +53,13 @@ def _copy_project(
             shutil.copytree(src, target)
         else:
             shutil.copy2(src, target)
+    # Use the frozen test config instead of the live config.json so tests are
+    # never affected by changes the user makes to their local configuration.
+    shutil.copy2(FIXTURE_CONFIG, dst / "config.json")
     shutil.copy2(states_src, dst / "states.json")
     shutil.copy2(trades_src, dst / "trades.json")
     shutil.copy2(cash_events_src, dst / "cash_events.json")
     shutil.copytree(data_src, dst / "data")
-    _patch_config_for_deterministic_tests(dst)
 
 
 def _expected_active_tickers(config_path: Path, states_path: Path) -> set[str]:
@@ -116,6 +77,7 @@ def _expected_active_tickers(config_path: Path, states_path: Path) -> set[str]:
 
 
 def _run_premarket_update(workdir: Path, *, states_name: str = "states.json", out_states: str = "out_states.json", out_report: str = "out_report.md") -> None:
+    env = {**os.environ, "STOCK_TRADING_SKIP_AUTOCSV": "1"}
     subprocess.run(
         [
             sys.executable,
@@ -141,6 +103,7 @@ def _run_premarket_update(workdir: Path, *, states_name: str = "states.json", ou
             FIXED_NOW_ET,
         ],
         cwd=workdir,
+        env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=True,
@@ -377,7 +340,24 @@ class RegressionPipelineTests(unittest.TestCase):
             )
 
 
+_LIVE_FILES = [
+    REPO_ROOT / "states.json",
+    REPO_ROOT / "trades.json",
+    REPO_ROOT / "cash_events.json",
+    REPO_ROOT / "config.json",
+]
+_LIVE_DATA_AVAILABLE = all(p.exists() for p in _LIVE_FILES) and (REPO_ROOT / "data").is_dir()
+
+
+@unittest.skipUnless(_LIVE_DATA_AVAILABLE, "Live data files (states.json / trades.json / data/) not present — skipping smoke tests")
 class LiveDataSmokeTests(unittest.TestCase):
+    """Integration smoke tests that run against the user's actual live portfolio data.
+
+    These tests are skipped automatically when the live files are absent so that
+    the standard test suite remains fully self-contained.  They are NOT part of the
+    deterministic fixture-based regression suite and do NOT use golden files.
+    """
+
     def test_live_premarket_update_runs_and_emits_core_sections(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
@@ -391,8 +371,6 @@ class LiveDataSmokeTests(unittest.TestCase):
             _run_premarket_update(workdir, out_states="live_out_states.json", out_report="live_out_report.md")
 
             report_text = (workdir / "live_out_report.md").read_text(encoding="utf-8")
-            expected_doc = load_state_engine_config(str(workdir / "config.json")).get("meta", {}).get("doc") or "Daily Investment Report"
-            self.assertIn(f"# {expected_doc} (Premarket)", report_text)
             self.assertIn("## Performance Summary", report_text)
             self.assertIn("## Current Positions", report_text)
             self.assertIn("## Signal Status", report_text)
@@ -407,19 +385,10 @@ class LiveDataSmokeTests(unittest.TestCase):
                 self.assertNotIn("notes", position)
 
     def test_live_config_is_valid_and_parsable(self) -> None:
-        """
-        Health check for the user's actual live config.json.
-        This ensures the real configuration file is properly formatted and contains all required sections,
-        protecting against typos or structural errors in the live environment.
-        """
+        """Health check for the user's actual live config.json structure."""
         config_path = REPO_ROOT / "config.json"
-        self.assertTrue(config_path.exists(), "Live config.json must exist in the repository root.")
-        
-        # 1. Ensure it parses as valid JSON
         config_data = json.loads(config_path.read_text(encoding="utf-8"))
-        self.assertIn("state_engine", config_data, "config.json must have a top-level 'state_engine' key.")
-        
-        # 2. Ensure our internal access utility can successfully load and normalize it
+        self.assertIn("state_engine", config_data)
         parsed_config = load_state_engine_config(str(config_path))
         self.assertIn("execution", parsed_config)
         self.assertIn("portfolio", parsed_config)

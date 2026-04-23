@@ -671,6 +671,180 @@ class GuiLauncherTests(unittest.TestCase):
             self.assertRegex(content, r'base:\s*["\']\./["\']', "vite.config.ts must use relative base path './' to work in Electron")
 
 
+class GuiServicesDataManagementTests(unittest.TestCase):
+    def _write_valid_repo(self, root: Path) -> None:
+        (root / "report").mkdir()
+        (root / "data").mkdir()
+        (root / "logs").mkdir()
+        (root / "config.json").write_text(json.dumps({"state_engine": {"meta": {"doc": "Test", "trades_file": "trades.json", "cash_events_file": "cash_events.json"}, "execution": {"buy_fee_rate": 0.001, "sell_fee_rate": 0.004}, "portfolio": {"buckets": {}}, "strategy": {"tactical": {"indicators": {}}}, "data": {"fx_pairs": {}, "csv_sources": {}, "trading_calendar": {}}, "reporting": {}, "gui": {}}}), encoding="utf-8")
+        (root / "states.json").write_text(json.dumps({"portfolio": {"positions": []}}), encoding="utf-8")
+        (root / "trades.json").write_text("[]", encoding="utf-8")
+        (root / "cash_events.json").write_text("[]", encoding="utf-8")
+
+    # --- check_environment ---
+
+    def test_check_environment_ok_when_all_files_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            svc = GuiServices(root)
+            status = svc.check_environment()
+            self.assertTrue(status["ok"])
+            self.assertEqual(status["missing"], [])
+            self.assertEqual(status["invalid"], [])
+
+    def test_check_environment_reports_missing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            (root / "trades.json").unlink()
+            (root / "cash_events.json").unlink()
+            svc = GuiServices(root)
+            status = svc.check_environment()
+            self.assertFalse(status["ok"])
+            self.assertIn("trades.json", status["missing"])
+            self.assertIn("cash_events.json", status["missing"])
+
+    def test_check_environment_reports_invalid_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            (root / "config.json").write_text('{"not_state_engine": {}}', encoding="utf-8")
+            svc = GuiServices(root)
+            status = svc.check_environment()
+            self.assertFalse(status["ok"])
+            self.assertIn("config.json", status["invalid"])
+
+    def test_check_environment_reports_corrupt_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            (root / "trades.json").write_text("not json", encoding="utf-8")
+            svc = GuiServices(root)
+            status = svc.check_environment()
+            self.assertFalse(status["ok"])
+            self.assertIn("trades.json", status["invalid"])
+
+    def test_check_environment_reports_wrong_type_for_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            (root / "trades.json").write_text('{"not": "a list"}', encoding="utf-8")
+            svc = GuiServices(root)
+            status = svc.check_environment()
+            self.assertIn("trades.json", status["invalid"])
+
+    # --- init_clean_environment ---
+
+    def test_init_clean_creates_missing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "report").mkdir()
+            (root / "data").mkdir()
+            (root / "logs").mkdir()
+            svc = GuiServices(root)
+            result = svc.init_clean_environment()
+            self.assertTrue(result.success)
+            for fname in ("config.json", "states.json", "trades.json", "cash_events.json"):
+                self.assertTrue((root / fname).exists(), f"{fname} should be created")
+            # created files must be valid
+            status = svc.check_environment()
+            self.assertTrue(status["ok"])
+
+    def test_init_clean_does_not_overwrite_valid_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            original_trades = (root / "trades.json").read_text(encoding="utf-8")
+            (root / "states.json").unlink()  # only states is missing
+            svc = GuiServices(root)
+            svc.init_clean_environment()
+            # trades.json (valid) should be unchanged
+            self.assertEqual((root / "trades.json").read_text(encoding="utf-8"), original_trades)
+            self.assertTrue((root / "states.json").exists())
+
+    def test_init_clean_replaces_invalid_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            (root / "config.json").write_text("not json", encoding="utf-8")
+            svc = GuiServices(root)
+            result = svc.init_clean_environment()
+            self.assertTrue(result.success)
+            # config should now be valid
+            status = svc.check_environment()
+            self.assertNotIn("config.json", status["invalid"])
+
+    # --- export_zip and import_zip ---
+
+    def test_export_zip_creates_archive_with_expected_files(self) -> None:
+        import zipfile as zf
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            (root / "report_spec.json").write_text("{}", encoding="utf-8")
+            dest = root / "backup.zip"
+            svc = GuiServices(root)
+            result = svc.export_zip(str(dest))
+            self.assertTrue(result.success)
+            self.assertTrue(dest.exists())
+            with zf.ZipFile(dest) as z:
+                names = set(z.namelist())
+            self.assertIn("config.json", names)
+            self.assertIn("trades.json", names)
+            self.assertIn("cash_events.json", names)
+            self.assertIn("states.json", names)
+
+    def test_export_zip_skips_nonexistent_files(self) -> None:
+        import zipfile as zf
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            dest = root / "backup.zip"
+            svc = GuiServices(root)
+            result = svc.export_zip(str(dest))
+            self.assertTrue(result.success)
+            with zf.ZipFile(dest) as z:
+                self.assertNotIn("report_spec.json", z.namelist())
+
+    def test_import_zip_restores_files(self) -> None:
+        import zipfile as zf
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            # Create zip with a modified trades.json
+            zip_path = root / "restore.zip"
+            with zf.ZipFile(zip_path, "w") as z:
+                z.writestr("trades.json", '[{"trade_id": 999}]')
+                z.writestr("config.json", (root / "config.json").read_text(encoding="utf-8"))
+            svc = GuiServices(root)
+            result = svc.import_zip(str(zip_path))
+            self.assertTrue(result.success)
+            self.assertIn("trades.json", result.stdout)
+            restored = json.loads((root / "trades.json").read_text(encoding="utf-8"))
+            self.assertEqual(restored[0]["trade_id"], 999)
+
+    def test_import_zip_rejects_unrecognized_entries(self) -> None:
+        import zipfile as zf
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_valid_repo(root)
+            zip_path = root / "bad.zip"
+            with zf.ZipFile(zip_path, "w") as z:
+                z.writestr("malicious.py", "print('hi')")
+            svc = GuiServices(root)
+            result = svc.import_zip(str(zip_path))
+            self.assertFalse(result.success)
+            self.assertFalse((root / "malicious.py").exists())
+
+    def test_import_zip_file_not_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            svc = GuiServices(Path(tmp))
+            result = svc.import_zip("/nonexistent/path/backup.zip")
+            self.assertFalse(result.success)
+            self.assertIn("not found", result.message.lower())
+
+
 class GuiIpcTests(unittest.TestCase):
     def test_read_payload_uses_readline_to_prevent_deadlock(self) -> None:
         with mock.patch("sys.stdin.readline", return_value='{"action": "ping"}\n'):

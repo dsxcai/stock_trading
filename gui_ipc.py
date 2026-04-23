@@ -69,6 +69,7 @@ def main() -> int:
                 "signal_config": {"selected_windows": {}, "candidate_tickers": []},
                 "last_result": backend.serialize_operation_result(session_state.last_result),
                 "modes": [],
+                "environment_status": backend.services.check_environment(),
             }
             exc = inner_exc
         response = {

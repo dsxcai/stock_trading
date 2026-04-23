@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from core.models import TacticalPlan
-from core.report_bundle import build_report_root
+from core.report_bundle import _build_report_activities, _sell_realized_by_trade_id, build_report_root
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -341,6 +341,101 @@ class ReportBundleTests(unittest.TestCase):
 
         self.assertEqual(set(actual_notes), current_tickers)
         self.assertEqual(actual_notes, expected_notes)
+
+
+class SellRealizedPnlTests(unittest.TestCase):
+    def _buy(self, trade_id: int, ticker: str, shares: int, cash_amount: float, date: str = "2026-01-01", time_tw: str = "2026/01/01 22:00:00") -> dict:
+        return {"trade_id": trade_id, "trade_date_et": date, "time_tw": time_tw, "ticker": ticker, "side": "BUY", "shares": shares, "cash_amount": cash_amount, "gross": cash_amount, "fee": 0.0}
+
+    def _sell(self, trade_id: int, ticker: str, shares: int, gross: float, fee: float, date: str = "2026-01-02", time_tw: str = "2026/01/02 22:00:00", price: float = 0.0) -> dict:
+        return {"trade_id": trade_id, "trade_date_et": date, "time_tw": time_tw, "ticker": ticker, "side": "SELL", "shares": shares, "gross": gross, "fee": fee, "price": price or gross / shares}
+
+    def test_simple_buy_then_sell_full(self) -> None:
+        trades = [
+            self._buy(1, "AAA", 10, 100.0),   # $10/share all-in
+            self._sell(2, "AAA", 10, 120.0, 0.0, price=12.0),
+        ]
+        result = _sell_realized_by_trade_id(trades)
+        self.assertIn("2", result)
+        self.assertAlmostEqual(result["2"]["buy_price"], 10.0)
+        # realized = cash_effect(sell) - cost = 120.0 - 100.0 = 20.0
+        self.assertAlmostEqual(result["2"]["realized_pnl"], 20.0)
+
+    def test_sell_fee_reduces_realized_pnl(self) -> None:
+        trades = [
+            self._buy(1, "AAA", 10, 100.0),
+            self._sell(2, "AAA", 10, 120.0, 2.0, price=12.0),
+        ]
+        result = _sell_realized_by_trade_id(trades)
+        # cash_effect = 120 - 2 = 118; cost = 100; pnl = 18
+        self.assertAlmostEqual(result["2"]["realized_pnl"], 18.0)
+
+    def test_partial_sell_fifo(self) -> None:
+        trades = [
+            self._buy(1, "AAA", 10, 100.0),   # $10/share
+            self._sell(2, "AAA", 4, 52.0, 0.0, price=13.0),
+        ]
+        result = _sell_realized_by_trade_id(trades)
+        self.assertAlmostEqual(result["2"]["buy_price"], 10.0)
+        # cash_effect = 52; cost_matched = 4*10 = 40; pnl = 12
+        self.assertAlmostEqual(result["2"]["realized_pnl"], 12.0)
+
+    def test_multiple_lots_fifo_order(self) -> None:
+        trades = [
+            self._buy(1, "AAA", 5, 50.0, date="2026-01-01"),   # $10/share
+            self._buy(2, "AAA", 5, 75.0, date="2026-01-02"),   # $15/share
+            self._sell(3, "AAA", 7, 91.0, 0.0, date="2026-01-03", price=13.0),
+        ]
+        result = _sell_realized_by_trade_id(trades)
+        # FIFO: 5 shares @ $10 + 2 shares @ $15 = $80 cost for 7 shares
+        self.assertAlmostEqual(result["3"]["buy_price"], 80.0 / 7, places=5)
+        # cash_effect = 91; cost = 80; pnl = 11
+        self.assertAlmostEqual(result["3"]["realized_pnl"], 11.0)
+
+    def test_buy_rows_not_in_result(self) -> None:
+        trades = [
+            self._buy(1, "AAA", 10, 100.0),
+            self._sell(2, "AAA", 10, 120.0, 0.0),
+        ]
+        result = _sell_realized_by_trade_id(trades)
+        self.assertNotIn("1", result)
+
+    def test_no_open_lots_sell_ignored(self) -> None:
+        trades = [self._sell(1, "AAA", 5, 50.0, 0.0)]
+        result = _sell_realized_by_trade_id(trades)
+        self.assertNotIn("1", result)
+
+    def test_different_tickers_isolated(self) -> None:
+        trades = [
+            self._buy(1, "AAA", 10, 100.0),
+            self._buy(2, "BBB", 10, 200.0),
+            self._sell(3, "AAA", 10, 110.0, 0.0),
+            self._sell(4, "BBB", 10, 180.0, 0.0),
+        ]
+        result = _sell_realized_by_trade_id(trades)
+        self.assertAlmostEqual(result["3"]["buy_price"], 10.0)
+        self.assertAlmostEqual(result["4"]["buy_price"], 20.0)
+        self.assertAlmostEqual(result["3"]["realized_pnl"], 10.0)
+        self.assertAlmostEqual(result["4"]["realized_pnl"], -20.0)
+
+    def test_sell_activity_row_contains_buy_price_and_realized_pnl(self) -> None:
+        trades = [
+            self._buy(1, "AAA", 10, 100.0),
+            self._sell(2, "AAA", 10, 130.0, 0.0, price=13.0),
+        ]
+        activities = _build_report_activities(trades, [])
+        sell_row = next(r for r in activities if r.get("side", "").upper().startswith("S"))
+        self.assertIn("buy_price", sell_row)
+        self.assertIn("realized_pnl", sell_row)
+        self.assertAlmostEqual(sell_row["buy_price"], 10.0)
+        self.assertAlmostEqual(sell_row["realized_pnl"], 30.0)
+
+    def test_buy_activity_row_has_no_buy_price(self) -> None:
+        trades = [self._buy(1, "AAA", 10, 100.0)]
+        activities = _build_report_activities(trades, [])
+        buy_row = activities[0]
+        self.assertNotIn("buy_price", buy_row)
+        self.assertNotIn("realized_pnl", buy_row)
 
 
 if __name__ == "__main__":

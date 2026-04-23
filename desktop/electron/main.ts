@@ -284,6 +284,48 @@ ipcMain.handle("desktop:pick-capital-xls", async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle("desktop:pick-zip-file", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Select Data Zip",
+    properties: ["openFile"],
+    filters: [
+      { name: "Zip Archives", extensions: ["zip"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+ipcMain.handle("desktop:save-zip-path", async () => {
+  const result = await dialog.showSaveDialog({
+    title: "Export Data Zip",
+    defaultPath: path.join(REPO_ROOT, `trading_backup_${new Date().toISOString().slice(0, 10)}.zip`),
+    filters: [
+      { name: "Zip Archives", extensions: ["zip"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  return result.filePath;
+});
+
+ipcMain.handle("desktop:init-clean-env", async () => {
+  return invokeDesktopAction("init-clean-env");
+});
+
+ipcMain.handle("desktop:export-zip", async (_event: IpcMainInvokeEvent, payload: Record<string, unknown>) => {
+  return invokeDesktopAction("export-zip", payload);
+});
+
+ipcMain.handle("desktop:import-zip", async (_event: IpcMainInvokeEvent, payload: Record<string, unknown>) => {
+  return invokeDesktopAction("import-zip", payload);
+});
+
 ipcMain.handle("desktop:reload-application", async () => {
   fs.writeFileSync(path.join(REPO_ROOT, ".restart_flag"), "");
   app.quit();

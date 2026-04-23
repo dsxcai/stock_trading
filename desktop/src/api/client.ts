@@ -43,6 +43,12 @@ export class GuiApiClient {
         return window.desktopApi.saveRuntimeConfig(payload as Record<string, unknown>);
       case "save-signal-config":
         return window.desktopApi.saveSignalConfig(payload as Record<string, unknown>);
+      case "init-clean-env":
+        return window.desktopApi.initCleanEnv();
+      case "export-zip":
+        return window.desktopApi.exportZip(payload as Record<string, unknown>);
+      case "import-zip":
+        return window.desktopApi.importZip(payload as Record<string, unknown>);
       default:
         throw new Error(`Unsupported desktop action: ${action}`);
     }

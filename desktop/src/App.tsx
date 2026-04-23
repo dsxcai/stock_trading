@@ -7,11 +7,14 @@ import { useEffect, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import pkg from "../package.json";
+
 import { GuiApiClient, loadDesktopConfig } from "@/api/client";
 import type {
   ApiStateResponse,
   DashboardState,
   DesktopShellConfig,
+  EnvironmentStatus,
   OperationResult,
   RuntimeConfigSnapshot,
   SignalConfigSnapshot,
@@ -127,25 +130,26 @@ const PROGRESS_PROFILES: ProgressProfile[] = [
 ];
 
 function snapshotToRuntimeForm(snapshot: RuntimeConfigSnapshot): RuntimeConfigFormState {
+  const precision = snapshot.numeric_precision ?? {};
   return {
-    doc: snapshot.doc,
-    trades_file: snapshot.trades_file,
-    cash_events_file: snapshot.cash_events_file,
-    buy_fee_rate: String(snapshot.buy_fee_rate),
-    sell_fee_rate: String(snapshot.sell_fee_rate),
-    core_tickers: snapshot.core_tickers_text,
-    tactical_tickers: snapshot.tactical_tickers_text,
-    tactical_cash_pool_ticker: snapshot.tactical_cash_pool_ticker,
-    tactical_cash_pool_tickers: snapshot.tactical_cash_pool_tickers_text,
-    fx_pairs: snapshot.fx_pairs_text,
-    csv_sources: snapshot.csv_sources_text,
-    closed_days: snapshot.closed_days_text,
-    early_close_days: snapshot.early_closes_text,
-    keep_prev_trade_days_simplified: String(snapshot.keep_prev_trade_days_simplified),
+    doc: snapshot.doc ?? "",
+    trades_file: snapshot.trades_file ?? "",
+    cash_events_file: snapshot.cash_events_file ?? "",
+    buy_fee_rate: String(snapshot.buy_fee_rate ?? ""),
+    sell_fee_rate: String(snapshot.sell_fee_rate ?? ""),
+    core_tickers: snapshot.core_tickers_text ?? "",
+    tactical_tickers: snapshot.tactical_tickers_text ?? "",
+    tactical_cash_pool_ticker: snapshot.tactical_cash_pool_ticker ?? "",
+    tactical_cash_pool_tickers: snapshot.tactical_cash_pool_tickers_text ?? "",
+    fx_pairs: snapshot.fx_pairs_text ?? "",
+    csv_sources: snapshot.csv_sources_text ?? "",
+    closed_days: snapshot.closed_days_text ?? "",
+    early_close_days: snapshot.early_closes_text ?? "",
+    keep_prev_trade_days_simplified: String(snapshot.keep_prev_trade_days_simplified ?? ""),
     ...Object.fromEntries(
       PRECISION_FIELDS.map((field) => [
         field.key,
-        String(snapshot.numeric_precision[field.key] ?? 0),
+        String(precision[field.key] ?? 0),
       ]),
     ),
   };
@@ -193,6 +197,22 @@ function renderLogText(result: OperationResult | null, errorLogText: string): st
   return "No log output captured for the latest operation.";
 }
 
+function EnvironmentStatusPanel({ status }: { status: EnvironmentStatus }) {
+  if (status.ok) {
+    return <div className="env-status env-status-ok">All data files present and valid.</div>;
+  }
+  return (
+    <div className="env-status env-status-warn">
+      {status.missing.length > 0 && (
+        <div><strong>Missing:</strong> {status.missing.join(", ")}</div>
+      )}
+      {status.invalid.length > 0 && (
+        <div><strong>Invalid:</strong> {status.invalid.join(", ")}</div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [desktopConfig, setDesktopConfig] = useState<DesktopShellConfig | null>(null);
   const [apiClient, setApiClient] = useState<GuiApiClient | null>(null);
@@ -223,6 +243,7 @@ export default function App() {
   const [customSignalTickers, setCustomSignalTickers] = useState("");
   const [customSignalWindow, setCustomSignalWindow] = useState("50");
   const [selectedReports, setSelectedReports] = useState<Set<string>>(new Set());
+  const [importZipPath, setImportZipPath] = useState("");
   const [progress, setProgress] = useState(0);
   const [progressPhase, setProgressPhase] = useState("");
 
@@ -493,6 +514,66 @@ export default function App() {
     );
   }
 
+  async function handleInitCleanEnv() {
+    if (!window.confirm("Initialize missing or invalid data files with clean defaults? Existing valid files will not be changed.")) {
+      return;
+    }
+    await runAction("Initializing clean environment...", () => apiClient!.invokeAction("init-clean-env", {}), "config");
+  }
+
+  async function handleSetupAndReload() {
+    if (!apiClient) {
+      setErrorMessage("The desktop API client is not ready.");
+      return;
+    }
+    setBusyMessage("Initializing clean environment...");
+    setErrorMessage("");
+    try {
+      await apiClient.invokeAction("init-clean-env", {});
+      await handleReloadApp();
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    } finally {
+      setBusyMessage("");
+    }
+  }
+
+  async function handleExportZip() {
+    if (!window.desktopApi) {
+      setErrorMessage("Electron bridge unavailable.");
+      return;
+    }
+    const destPath = await window.desktopApi.saveZipPath();
+    if (!destPath) {
+      return;
+    }
+    await runAction("Exporting data zip...", () => apiClient!.invokeAction("export-zip", { dest_path: destPath }), "config");
+  }
+
+  async function handleBrowseImportZip() {
+    if (!window.desktopApi) {
+      return;
+    }
+    const selectedPath = await window.desktopApi.pickZipFile();
+    if (!selectedPath) {
+      return;
+    }
+    setImportZipPath(selectedPath);
+  }
+
+  async function handleImportZip(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!importZipPath.trim()) {
+      setErrorMessage("Select a zip file to import.");
+      return;
+    }
+    if (!window.confirm("Import will overwrite config.json, states.json, trades.json, cash_events.json, and report_spec.json from the zip. Continue?")) {
+      return;
+    }
+    await runAction("Importing data zip...", () => apiClient!.invokeAction("import-zip", { zip_path: importZipPath }), "config");
+    setImportZipPath("");
+  }
+
   async function handleReloadApp() {
     if (!window.desktopApi) {
       setErrorMessage("The Electron desktop bridge is unavailable in this renderer.");
@@ -541,6 +622,100 @@ export default function App() {
     );
   }
 
+  const envStatus = dashboard.environment_status;
+  const needsSetup = !envStatus?.ok;
+
+  if (needsSetup) {
+    return (
+      <>
+        <div className="loading-screen">
+          <div className="loading-card setup-card">
+            <div className="eyebrow">v{pkg.version} · {pkg.author}</div>
+            <h1>Stock Trading Desktop</h1>
+            <p>Some required data files are missing or invalid. Initialize a clean environment to get started.</p>
+
+            {envStatus?.missing?.length ? (
+              <div className="setup-file-list">
+                <span className="setup-file-label">Missing:</span>
+                {envStatus.missing.map((f) => <code key={f}>{f}</code>)}
+              </div>
+            ) : null}
+            {envStatus?.invalid?.length ? (
+              <div className="setup-file-list">
+                <span className="setup-file-label">Invalid:</span>
+                {envStatus.invalid.map((f) => <code key={f}>{f}</code>)}
+              </div>
+            ) : null}
+
+            {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
+
+            <div className="setup-actions">
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void handleSetupAndReload()}
+                disabled={!!busyMessage}
+              >
+                Initialize Clean Environment
+              </button>
+
+              <form className="setup-zip-row" onSubmit={(e) => {
+                e.preventDefault();
+                void (async () => {
+                  if (!importZipPath.trim()) { setErrorMessage("Select a zip file first."); return; }
+                  setBusyMessage("Importing data zip...");
+                  setErrorMessage("");
+                  try {
+                    await apiClient!.invokeAction("import-zip", { zip_path: importZipPath });
+                    await handleReloadApp();
+                  } catch (err) { setErrorMessage(getErrorMessage(err)); }
+                  finally { setBusyMessage(""); }
+                })();
+              }}>
+                <input
+                  type="text"
+                  value={importZipPath}
+                  placeholder="/path/to/backup.zip"
+                  onChange={(e) => setImportZipPath(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void handleBrowseImportZip()}
+                  disabled={!!busyMessage}
+                >
+                  Browse
+                </button>
+                <button type="submit" className="secondary-button" disabled={!!busyMessage || !importZipPath.trim()}>
+                  Import Zip
+                </button>
+              </form>
+            </div>
+
+            <div className="hero-actions" style={{ marginTop: "12px" }}>
+              <button type="button" className="secondary-button" onClick={() => void handleReloadApp()} disabled={!!busyMessage}>
+                Reload
+              </button>
+              <button type="button" className="danger-button" onClick={() => void handleCloseApp()} disabled={!!busyMessage}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {busyMessage ? (
+          <div className="busy-overlay">
+            <div className="busy-card">
+              <div className="busy-spinner" />
+              <h3>{busyMessage}</h3>
+              <p>Setting up the environment...</p>
+            </div>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
   const currentResult = dashboard.last_result;
   const allReportsSelected =
     dashboard.recent_reports.length > 0 && selectedReports.size === dashboard.recent_reports.length;
@@ -564,12 +739,8 @@ export default function App() {
       <div className="app-shell">
         <aside className="control-rail">
           <section className="hero-card">
-            <div className="eyebrow">Electron + React + TypeScript</div>
+            <div className="eyebrow">v{pkg.version} · {pkg.author}</div>
             <h1>Stock Trading Desktop</h1>
-            <p>
-              Python keeps the trading logic and file workflow. React talks to Electron IPC, and Electron
-              invokes Python directly without a local web server.
-            </p>
             <div className="hero-meta">
               <span>{window.desktopApi ? "Electron shell" : "Renderer only"}</span>
               <span>{desktopConfig?.transport === "ipc" ? "Direct IPC bridge" : "Desktop bridge pending"}</span>
@@ -897,6 +1068,13 @@ export default function App() {
           </header>
 
           {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
+          {!dashboard.environment_status?.ok && !errorMessage ? (
+            <div className="error-banner">
+              Data file issues detected — go to Config → Data Management to resolve.
+              {dashboard.environment_status?.missing?.length ? ` Missing: ${dashboard.environment_status.missing.join(", ")}.` : ""}
+              {dashboard.environment_status?.invalid?.length ? ` Invalid: ${dashboard.environment_status.invalid.join(", ")}.` : ""}
+            </div>
+          ) : null}
 
           {activeTab === "report" ? (
             <section className="viewer-card">{renderReport}</section>
@@ -1150,6 +1328,54 @@ export default function App() {
                   Save Signal Config
                 </button>
               </form>
+
+              <div className="config-card">
+                <div className="section-head">
+                  <h3>Data Management</h3>
+                  <p>Check data file health, create a clean environment, or backup and restore via zip.</p>
+                </div>
+
+                <EnvironmentStatusPanel status={dashboard.environment_status} />
+
+                <div className="data-mgmt-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void handleInitCleanEnv()}
+                    disabled={!!busyMessage}
+                  >
+                    Initialize Clean Environment
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void handleExportZip()}
+                    disabled={!!busyMessage}
+                  >
+                    Export Data Zip
+                  </button>
+                </div>
+
+                <form className="stack" onSubmit={(e) => void handleImportZip(e)}>
+                  <label className="field-with-action">
+                    <span>Import Data Zip</span>
+                    <div className="input-action-row">
+                      <input
+                        type="text"
+                        value={importZipPath}
+                        placeholder="/path/to/backup.zip"
+                        onChange={(event) => setImportZipPath(event.target.value)}
+                      />
+                      <button type="button" className="secondary-button" onClick={() => void handleBrowseImportZip()} disabled={!!busyMessage}>
+                        Browse
+                      </button>
+                    </div>
+                  </label>
+                  <button type="submit" disabled={!!busyMessage || !importZipPath.trim()}>
+                    Import Zip
+                  </button>
+                </form>
+              </div>
             </section>
           ) : null}
         </main>

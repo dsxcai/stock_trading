@@ -157,6 +157,48 @@ def _float_or_none(value: Any) -> Optional[float]:
         return None
 
 
+def _sell_realized_by_trade_id(trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """FIFO pass: for each SELL trade return buy_price (avg cost/share) and realized_pnl."""
+    lots_by_ticker: Dict[str, List[Dict[str, Any]]] = {}
+    result: Dict[str, Dict[str, Any]] = {}
+    for trade in sorted(trades, key=_trade_note_sort_key):
+        ticker = str(trade.get("ticker") or "").upper().strip()
+        side = str(trade.get("side") or "").upper().strip()
+        trade_id = str(trade.get("trade_id") or "").strip()
+        try:
+            shares = int(float(trade.get("shares") or 0))
+        except Exception:
+            shares = 0
+        if not ticker or shares <= 0:
+            continue
+        ticker_lots = lots_by_ticker.setdefault(ticker, [])
+        if side.startswith("B"):
+            total_cost = _trade_buy_total_cost_usd(trade)
+            if total_cost is None:
+                continue
+            ticker_lots.append({"shares": shares, "unit_cost_usd": float(total_cost) / float(shares)})
+        elif side.startswith("S") and trade_id:
+            remaining = shares
+            total_cost_matched = 0.0
+            shares_matched = 0
+            while remaining > 0 and ticker_lots:
+                lot = ticker_lots[0]
+                lot_shares = int(lot.get("shares") or 0)
+                used = min(remaining, lot_shares)
+                total_cost_matched += used * float(lot.get("unit_cost_usd") or 0.0)
+                shares_matched += used
+                remaining -= used
+                lot["shares"] = lot_shares - used
+                if lot["shares"] <= 0:
+                    ticker_lots.pop(0)
+            if shares_matched > 0:
+                avg_buy_price = total_cost_matched / shares_matched
+                sell_cash_effect = _trade_cash_effect(trade)
+                realized_pnl = (sell_cash_effect - total_cost_matched) if sell_cash_effect is not None else None
+                result[trade_id] = {"buy_price": avg_buy_price, "realized_pnl": realized_pnl}
+    return result
+
+
 def _trade_fee_split(side: str, fee_value: Optional[float]) -> tuple[Optional[float], Optional[float]]:
     side_norm = str(side or "").upper().strip()
     if fee_value is None:
@@ -232,10 +274,15 @@ def _cash_event_to_activity_row(event: Dict[str, Any]) -> Optional[Dict[str, Any
 
 
 def _build_report_activities(trades: List[Dict[str, Any]], cash_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    sell_realized = _sell_realized_by_trade_id(trades)
     activities: List[Dict[str, Any]] = []
     for item in sorted(trades, key=_trade_note_sort_key):
         if isinstance(item, dict):
-            activities.append(_trade_to_activity_row(item))
+            row = _trade_to_activity_row(item)
+            trade_id_key = str(item.get("trade_id") or "").strip()
+            if trade_id_key in sell_realized:
+                row.update(sell_realized[trade_id_key])
+            activities.append(row)
     for item in sorted(cash_events, key=_cash_event_sort_key):
         if not isinstance(item, dict):
             continue

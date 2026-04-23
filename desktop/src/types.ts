@@ -52,6 +52,12 @@ export type ModeInfo = {
   label: string;
 };
 
+export type EnvironmentStatus = {
+  ok: boolean;
+  missing: string[];
+  invalid: string[];
+};
+
 export type DashboardState = {
   ui: {
     selected_report_path: string;
@@ -66,6 +72,7 @@ export type DashboardState = {
   signal_config: SignalConfigSnapshot;
   last_result: OperationResult | null;
   modes: ModeInfo[];
+  environment_status: EnvironmentStatus;
 };
 
 export type ApiStateResponse = {

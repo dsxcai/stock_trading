@@ -7,14 +7,14 @@ import unittest
 from pathlib import Path
 
 from core.reconciliation import _upsert_trades
-from utils.precision import load_state_engine_numeric_precision
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
 
 def _numeric_precision() -> dict:
-    return load_state_engine_numeric_precision(str(REPO_ROOT / "config.json"))
+    return {"trade_cash_amount": 4, "trade_dedupe_amount": 6}
 
 
 class ReconciliationTests(unittest.TestCase):

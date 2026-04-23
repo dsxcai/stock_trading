@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import shlex
 import subprocess
 import sys
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -809,6 +811,171 @@ class GuiServices:
         if not match:
             return None
         return match.group("date"), match.group("mode").lower()
+
+    # --- Environment health check --------------------------------------------------
+
+    _DATA_FILES = ("config.json", "states.json", "trades.json", "cash_events.json")
+
+    def check_environment(self) -> Dict[str, Any]:
+        missing: List[str] = []
+        invalid: List[str] = []
+        for fname in self._DATA_FILES:
+            fpath = self.repo_root / fname
+            if not fpath.exists():
+                missing.append(fname)
+                continue
+            try:
+                raw = json.loads(fpath.read_text(encoding="utf-8"))
+                if fname == "config.json" and not isinstance(raw.get("state_engine"), dict):
+                    invalid.append(fname)
+                elif fname in ("trades.json", "cash_events.json") and not isinstance(raw, list):
+                    invalid.append(fname)
+                elif fname == "states.json" and not isinstance(raw.get("portfolio"), dict):
+                    invalid.append(fname)
+            except Exception:
+                invalid.append(fname)
+        return {
+            "ok": not missing and not invalid,
+            "missing": missing,
+            "invalid": invalid,
+        }
+
+    def init_clean_environment(self) -> OperationResult:
+        env = self.check_environment()
+        created: List[str] = []
+        skipped: List[str] = []
+        for fname in self._DATA_FILES:
+            fpath = self.repo_root / fname
+            needs_init = fname in env["missing"] or fname in env["invalid"]
+            if not needs_init:
+                skipped.append(fname)
+                continue
+            template = self._minimal_template(fname)
+            fpath.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
+            created.append(fname)
+        if created:
+            msg = f"Initialized {len(created)} file(s): {', '.join(created)}."
+            if skipped:
+                msg += f" Kept {len(skipped)} existing file(s) unchanged."
+        else:
+            msg = "All required files are already present and valid — nothing to initialize."
+        return OperationResult(
+            name="Initialize clean environment",
+            success=True,
+            returncode=0,
+            command="init-clean-env",
+            stdout=msg,
+            message=msg,
+        )
+
+    @staticmethod
+    def _minimal_template(fname: str) -> Any:
+        if fname == "config.json":
+            return {
+                "state_engine": {
+                    "meta": {"doc": "My Trading Portfolio", "trades_file": "trades.json", "cash_events_file": "cash_events.json"},
+                    "execution": {"buy_fee_rate": 0.001425, "sell_fee_rate": 0.004425},
+                    "portfolio": {"buckets": {"core": {"tickers": []}, "tactical": {"tickers": [], "cash_pool_ticker": ""}, "tactical_cash_pool": {"tickers": []}}},
+                    "strategy": {"tactical": {"indicators": {}}},
+                    "data": {"fx_pairs": {}, "csv_sources": {}, "trading_calendar": {"closed_days": {}, "early_closes": {}}},
+                    "reporting": {"numeric_precision": {}, "trade_render_policy": {"keep_prev_trade_days_simplified": 5}},
+                    "gui": {"window": {}},
+                }
+            }
+        if fname == "states.json":
+            return {"portfolio": {"positions": [], "cash": {"usd": 0.0, "baseline_usd": 0.0, "deployable_usd": 0.0, "reserve_usd": 0.0, "bucket": "core"}, "performance": {}}}
+        if fname in ("trades.json", "cash_events.json"):
+            return []
+        return {}
+
+    def export_zip(self, dest_path: str) -> OperationResult:
+        dest = Path(dest_path)
+        included: List[str] = []
+        skipped: List[str] = []
+        try:
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for fname in (*self._DATA_FILES, "report_spec.json"):
+                    fpath = self.repo_root / fname
+                    if fpath.exists():
+                        zf.write(fpath, arcname=fname)
+                        included.append(fname)
+                    else:
+                        skipped.append(fname)
+            dest.write_bytes(buf.getvalue())
+        except Exception as exc:
+            return OperationResult(
+                name="Export zip",
+                success=False,
+                returncode=1,
+                command=f"export-zip {dest_path}",
+                stdout=str(exc),
+                message=f"Export failed: {exc}",
+            )
+        msg = f"Exported {len(included)} file(s) to {dest.name}."
+        if skipped:
+            msg += f" Skipped missing: {', '.join(skipped)}."
+        return OperationResult(
+            name="Export zip",
+            success=True,
+            returncode=0,
+            command=f"export-zip {dest_path}",
+            stdout="\n".join(included),
+            message=msg,
+        )
+
+    def import_zip(self, zip_path: str) -> OperationResult:
+        src = Path(zip_path)
+        if not src.exists():
+            return OperationResult(
+                name="Import zip",
+                success=False,
+                returncode=1,
+                command=f"import-zip {zip_path}",
+                stdout="",
+                message=f"File not found: {zip_path}",
+            )
+        extracted: List[str] = []
+        skipped: List[str] = []
+        allowed = set((*self._DATA_FILES, "report_spec.json"))
+        try:
+            with zipfile.ZipFile(src, "r") as zf:
+                for name in zf.namelist():
+                    if name not in allowed:
+                        skipped.append(name)
+                        continue
+                    dest = self.repo_root / name
+                    dest.write_bytes(zf.read(name))
+                    extracted.append(name)
+        except Exception as exc:
+            return OperationResult(
+                name="Import zip",
+                success=False,
+                returncode=1,
+                command=f"import-zip {zip_path}",
+                stdout=str(exc),
+                message=f"Import failed: {exc}",
+            )
+        if not extracted:
+            return OperationResult(
+                name="Import zip",
+                success=False,
+                returncode=1,
+                command=f"import-zip {zip_path}",
+                stdout="\n".join(skipped),
+                message="No recognized data files found in the zip archive.",
+            )
+        msg = f"Imported {len(extracted)} file(s): {', '.join(extracted)}."
+        if skipped:
+            msg += f" Skipped unrecognized entries: {len(skipped)}."
+        return OperationResult(
+            name="Import zip",
+            success=True,
+            returncode=0,
+            command=f"import-zip {zip_path}",
+            stdout="\n".join(extracted),
+            message=msg,
+        )
 
     def _run_command(self, command: List[str], *, name: str) -> OperationResult:
         completed = subprocess.run(

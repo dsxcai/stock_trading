@@ -397,6 +397,9 @@ def _refresh_csv_history_for_mode_updates(
     if not str(mode_label or '').strip():
         print('[AUTOCSV] skipped: no --mode supplied.')
         return []
+    if os.environ.get('STOCK_TRADING_SKIP_AUTOCSV'):
+        print('[AUTOCSV] skipped: STOCK_TRADING_SKIP_AUTOCSV is set.')
+        return []
     active_tickers: List[str] = []
     seen = set()
     for ticker in tickers or []:

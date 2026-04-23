@@ -22,6 +22,11 @@ declare global {
       saveRuntimeConfig: (payload: Record<string, unknown>) => Promise<import("@/types").ApiStateResponse>;
       saveSignalConfig: (payload: Record<string, unknown>) => Promise<import("@/types").ApiStateResponse>;
       pickCapitalXls: () => Promise<string | null>;
+      pickZipFile: () => Promise<string | null>;
+      saveZipPath: () => Promise<string | null>;
+      initCleanEnv: () => Promise<import("@/types").ApiStateResponse>;
+      exportZip: (payload: Record<string, unknown>) => Promise<import("@/types").ApiStateResponse>;
+      importZip: (payload: Record<string, unknown>) => Promise<import("@/types").ApiStateResponse>;
       reloadApplication: () => Promise<void>;
       closeApplication: () => Promise<void>;
     };

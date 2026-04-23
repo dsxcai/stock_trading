@@ -1,0 +1,114 @@
+{
+  "state_engine": {
+    "meta": {
+      "doc": "Daily Investment Report",
+      "trades_file": "trades.json",
+      "cash_events_file": "cash_events.json"
+    },
+    "execution": {
+      "buy_fee_rate": 0.0015,
+      "sell_fee_rate": 0.0025
+    },
+    "portfolio": {
+      "buckets": {
+        "core": {
+          "tickers": [
+            "ARKQ",
+            "SPY"
+          ]
+        },
+        "tactical": {
+          "tickers": [
+            "AAPL",
+            "AMZN",
+            "GOOG",
+            "INDA",
+            "META",
+            "MSFT",
+            "NVDA",
+            "SMH"
+          ],
+          "cash_pool_ticker": ""
+        },
+        "tactical_cash_pool": {
+          "tickers": []
+        }
+      }
+    },
+    "strategy": {
+      "tactical": {
+        "indicators": {
+          "AAPL": "SMA50",
+          "AMZN": "SMA50",
+          "GOOG": "SMA50",
+          "INDA": "SMA100",
+          "META": "SMA50",
+          "MSFT": "SMA50",
+          "NVDA": "SMA50",
+          "SMH": "SMA100"
+        }
+      }
+    },
+    "data": {
+      "fx_pairs": {
+        "usd_twd": {
+          "ticker": "TWD=X"
+        }
+      },
+      "csv_sources": {},
+      "trading_calendar": {
+        "years": {
+          "2026": {
+            "closed": {
+              "2026-01-01": "New Year's Day",
+              "2026-01-19": "Martin Luther King, Jr. Day",
+              "2026-02-16": "Washington's Birthday",
+              "2026-04-03": "Good Friday",
+              "2026-05-25": "Memorial Day",
+              "2026-06-19": "Juneteenth National Independence Day",
+              "2026-07-03": "Independence Day (observed)",
+              "2026-09-07": "Labor Day",
+              "2026-11-26": "Thanksgiving Day",
+              "2026-12-25": "Christmas Day"
+            },
+            "early_close": {
+              "2026-11-27": {
+                "close_time_et": "13:00",
+                "reason": "Day after Thanksgiving"
+              },
+              "2026-12-24": {
+                "close_time_et": "13:00",
+                "reason": "Christmas Eve"
+              }
+            }
+          }
+        }
+      }
+    },
+    "reporting": {
+      "numeric_precision": {
+        "usd_amount": 2,
+        "display_price": 2,
+        "display_pct": 2,
+        "trade_cash_amount": 4,
+        "trade_dedupe_amount": 6,
+        "state_selected_fields": 4,
+        "backtest_amount": 4,
+        "backtest_price": 4,
+        "backtest_rate": 6,
+        "backtest_cost_param": 6
+      },
+      "trade_render_policy": {
+        "keep_prev_trade_days_simplified": 5
+      }
+    },
+    "gui": {
+      "window": {
+        "x": 299,
+        "y": 66,
+        "width": 1915,
+        "height": 1280
+      }
+    }
+  }
+}

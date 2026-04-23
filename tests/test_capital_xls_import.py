@@ -11,9 +11,9 @@ import unittest
 from pathlib import Path
 
 from extensions.capital_xls_import import parse_capital_xls_trades
-from utils.precision import load_state_engine_numeric_precision
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 _CAPITAL_HEADERS = [
     "商品名稱",
     "交易日",
@@ -39,8 +39,7 @@ _CAPITAL_HEADERS = [
 
 
 def _trade_cash_amount_ndigits(config_path: Path | None = None) -> int:
-    resolved = config_path if config_path is not None else (REPO_ROOT / "config.json")
-    return int(load_state_engine_numeric_precision(str(resolved))["trade_cash_amount"])
+    return 4
 
 
 def _minimal_config(trade_cash_amount_ndigits: int, state_selected_fields_ndigits: int = 4) -> dict:
@@ -133,7 +132,10 @@ def _trade(trade_date_et: str, time_tw: str, ticker: str, side: str, shares: int
 
 
 def _capital_import_command(xls_path: Path) -> list[str]:
-    return [sys.executable, "-m", "extensions.capital_xls_import", str(xls_path)]
+    return [
+        sys.executable, "-m", "extensions.capital_xls_import", str(xls_path),
+        "--config", str(FIXTURES_DIR / "test_config.json"),
+    ]
 
 
 class CapitalXLSImportTests(unittest.TestCase):

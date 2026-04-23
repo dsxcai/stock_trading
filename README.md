@@ -79,6 +79,8 @@ The current Electron GUI is centered on one left-side control rail and one right
 - inspect the latest operation status, command, exit code, report path, log path, and captured log output
 - multi-select recent reports with checkboxes, `Select All` / `Deselect All`, and `Delete All Selects`
 - reload or close the desktop app directly from the GUI
+- view app version and author in the top-left hero card
+- check data file health, initialize a clean environment, and export or import runtime data as a zip from the `Config` tab
 
 ### 1.3 Main screen layout
 
@@ -108,6 +110,7 @@ Read it as follows:
 | `Report` tab | Read the selected markdown report |
 | `Status` tab | Confirm what command ran, whether it succeeded, and what it logged |
 | `Config` tab | Edit `config.json` through grouped forms instead of raw JSON editing |
+| `Data Management` (in Config) | Check data file health, initialize defaults, and backup or restore data via zip |
 
 ### 1.4 Generate a report
 
@@ -196,6 +199,15 @@ Recommended usage:
 3. Click `Save Runtime Config` or `Save Signal Config`.
 4. Review the `Status` tab if the save fails, or return to `Report` if you want to inspect the refreshed output.
 
+The `Config` tab also contains a **Data Management** section at the bottom. Use it to:
+
+- check which required data files (`config.json`, `states.json`, `trades.json`, `cash_events.json`) are present and structurally valid
+- click **Initialize Clean Environment** to create minimal valid defaults for any file that is missing or invalid, without touching files that are already correct
+- click **Export Data Zip** to save all runtime data files and `report_spec.json` into a zip archive via a native save dialog
+- use **Import Data Zip** to restore those files from a previously exported zip
+
+If any required file is missing or invalid when the app starts, a warning banner appears in the main workspace and directs you here.
+
 ### 1.7 Reload and close the GUI
 
 The app-level controls are exposed in the upper-left hero card:
@@ -213,7 +225,6 @@ Use them as follows:
 
 The current GUI is intentionally focused on routine workflows. A few tasks are still better handled from the CLI:
 
-- initializing an empty runtime directory from scratch still requires creating the local runtime files once
 - direct cash-only operations such as `--initial-investment-usd` and `--cash-transfer-to-reserve-usd` are not yet exposed in the GUI
 - broker reconciliation arguments such as `--broker-investment-total-usd` are still CLI-first
 - the GUI operates on the same local `config.json`, `states.json`, `trades.json`, `data/`, and `report/` files as the CLI
@@ -250,7 +261,9 @@ The current positions shown in reports are not entered manually as a separate so
 
 ### 2.2 Prepare the local runtime files if you are starting from zero
 
-`update_states.py` expects the state file to exist. If this is a brand-new local setup, create the runtime files once:
+`update_states.py` expects the state file to exist. For a brand-new local setup the easiest path is the GUI: open the `Config` tab, scroll to **Data Management**, and click **Initialize Clean Environment**. This creates minimal valid defaults for every required file that is missing or invalid.
+
+If you prefer the CLI, create the runtime files manually:
 
 ```bash
 printf '{}\n' > states.json
@@ -888,13 +901,36 @@ Positions that have been fully sold are now removed directly from `portfolio.pos
 | Unrealized PnL     | `market_value_usd - cost_usd`                       |
 | Unrealized percent | `unrealized_pnl_usd / cost_usd`, blank if cost is 0 |
 
-### 10.2 Total assets and NAV
+### 10.2 Trade Details table (full view)
+
+The `Trade Details` section groups trades by ET trade date. The most recent group uses the full column set; older groups use a simplified set.
+
+| Column | Meaning |
+| --- | --- |
+| Trade ID | Sequential trade identifier |
+| Ticker | Stock symbol, or `CASH` for external cash events |
+| Side | `BUY`, `SELL`, `DEPOSIT`, or `WITHDRAWAL` |
+| Time (TW) | Execution timestamp in Taiwan time |
+| Price | Per-share execution price |
+| Buy Basis | *(sell records only)* Weighted FIFO average cost per share of the matched buy lots |
+| Realized P&L | *(sell records only)* Sell net proceeds minus the matched FIFO cost basis |
+| Shares | Number of shares traded |
+| Gross | Pre-fee trade value |
+| Buy Fee / Sell Fee | Brokerage fee attributed to the buy or sell side |
+| Net Cash | Cash effect after fees (negative for buys, positive for sells and deposits) |
+| Cash Basis | Source label for the cash calculation |
+| Fee Rate | Effective fee rate |
+| Notes | Import notes or trade annotations |
+
+The group footer shows column totals for Shares, Gross, Realized P&L, Buy Fee, Sell Fee, and Net Cash.
+
+### 10.3 Total assets and NAV
 
 ```text
 portfolio.nav_usd = total market value of all holdings + deployable_usd + reserve_usd
 ```
 
-### 10.3 Return rate
+### 10.4 Return rate
 
 If an initial invested amount has been defined:
 
@@ -1167,27 +1203,38 @@ python3 update_states.py --states states.json --out states.json --mode Premarket
 ./run_tests.sh
 ```
 
-Current coverage includes the following:
+This runs `python3 -m unittest discover -s tests -v` from the repo root. All 12 test files are discovered automatically. Current coverage (156 tests) includes:
 
-- regression pipeline comparison of `update_states` plus `generate_report` against golden fixtures
-- strategy and download utility function tests
-- safety test ensuring report `row_computed` fields cannot be written back into state
-- tactical signal tests and tests for folding projected sell proceeds into the buy cash pool
-- backtest tests covering `t+1` execution, period selection, and markdown report generation
+- **Regression pipeline** (`test_regression_pipeline.py`): end-to-end comparison of `update_states.py` plus `generate_report.py` output against golden fixtures; force-mode session check; market snapshot rebuild; position-notes isolation from state
+- **Report bundle** (`test_report_bundle.py`): state purity, cash-event merging, open-lot notes, FIFO realized P&L calculation for sell records, activity row enrichment with `buy_price` and `realized_pnl`
+- **Reporting safety** (`test_reporting_safety.py`): `row_computed` fields cannot be written back into state; numeric rounding invariants
+- **State engine signals** (`test_state_engine_signals.py`): buy/sell signal logic, projected sell proceeds folded into buy cash pool, tactical allocation edge cases
+- **Capital XLS import** (`test_capital_xls_import.py`): broker trade parsing, deduplication, date-range filtering
+- **Imported trades JSON** (`test_imported_trades_json.py`): normalized trades import, append and replace modes, conflict detection
+- **Cash adjustment workflow** (`test_cash_adjustment_workflow.py`): deposit/withdrawal event creation and state update
+- **Trade date range filtering** (`test_gui_import_trade_date_range.py`): GUI-level import date bounds
+- **Reconciliation** (`test_reconciliation.py`): FIFO cost basis calculation
+- **GUI services** (`test_gui_services.py`): report listing/deletion, config load/save, signal config, Capital XLS import flow, environment health check, clean environment initialization, zip export and import
+- **Backtest** (`test_backtest.py`): `t+1` execution, period selection, tactical and mean-reversion markdown output
+- **Strategy and download utilities** (`test_strategy_and_download.py`): SMA computation, CSV download helpers, Electron build config checks
 
 ### 16.2 When fixtures should be refreshed
 
-Whenever the following items are modified, `tests/fixtures/*golden*` should generally be refreshed:
+Run `./refresh_test_fixtures.sh` whenever one of the following changes:
 
-- `state_engine` signal logic, cash allocation logic, or rounding output
-- report schema or rendering behavior
-- trade data structures or output formats for `states.json` or `trades.json`
+- `state_engine` signal logic, cash allocation logic, or numeric rounding output
+- `report_spec.json` schema — column additions, formatting, or table structure
+- trade or cash-event data structures that affect `states.json` or the rendered markdown
+
+The frozen test config (`tests/fixtures/test_config.json`) isolates regression tests from the live `config.json`. If you add new tickers or change fee rates in the live config, the regression tests are not affected unless you also update `test_config.json`.
 
 ### 16.3 Refresh regression fixtures with one command
 
 ```bash
 ./refresh_test_fixtures.sh
 ```
+
+The script runs `update_states.py` using the existing fixture inputs (`tests/fixtures/golden_premarket_*.json` and `tests/fixtures/market_data/`) with `STOCK_TRADING_SKIP_AUTOCSV=1` so no live yfinance data is downloaded. It writes the output back to `golden_premarket_states.json` and `golden_premarket_report.md`. Running the script multiple times on the same inputs is idempotent.
 
 An optional custom time anchor may also be specified:
 

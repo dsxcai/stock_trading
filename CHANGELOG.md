@@ -7,10 +7,17 @@ The format is inspired by Keep a Changelog, and this project uses semantic versi
 ## [Unreleased]
 
 ### Added
-- None.
+- Trade Details: `Buy Basis` and `Realized P&L` columns for sell records in the full Trade Details table. `Buy Basis` is the weighted FIFO average cost per share consumed by each sell. `Realized P&L` is the sell net proceeds minus that FIFO cost basis, with a group total in the footer row.
+- Desktop GUI now shows version and author (`v{version} · {author}`) in the top-left hero card, sourced dynamically from `desktop/package.json`.
+- **Data Management** panel added to the `Config` tab:
+  - Environment health check that lists which required data files (`config.json`, `states.json`, `trades.json`, `cash_events.json`) are missing or structurally invalid at startup and after every action.
+  - **Initialize Clean Environment** creates minimal valid defaults for any missing or invalid file without touching files that are already valid.
+  - **Export Data Zip** packages `config.json`, `states.json`, `trades.json`, `cash_events.json`, and `report_spec.json` into a user-selected zip archive via a native save dialog.
+  - **Import Data Zip** restores those files from a selected zip archive via a native open dialog.
+  - A warning banner in the main workspace flags data file issues and directs the user to Config → Data Management to resolve them.
 
 ### Changed
-- None.
+- `desktop/package.json` version bumped to `1.3.1+pre`.
 
 ### Fixed
 - None.

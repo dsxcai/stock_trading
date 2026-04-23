@@ -80,6 +80,7 @@ class GuiDesktopBackend:
             "signal_config": asdict(self.services.load_signal_config()),
             "last_result": self.serialize_operation_result(session_state.last_result),
             "modes": [{"key": key, "label": label} for key, label in _MODE_LABELS.items()],
+            "environment_status": self.services.check_environment(),
         }
 
     def perform_action(self, action: str, payload: Dict[str, Any]) -> DesktopSessionState:
@@ -160,6 +161,21 @@ class GuiDesktopBackend:
                 selected_windows,
                 selected_report_path=session_state.selected_report_path,
             )
+            return self._merge_operation_result(session_state, result)
+        if action_key == "init-clean-env":
+            result = self.services.init_clean_environment()
+            return self._merge_operation_result(session_state, result)
+        if action_key == "export-zip":
+            dest_path = str(payload.get("dest_path") or "").strip()
+            if not dest_path:
+                raise ValueError("dest_path is required for export-zip")
+            result = self.services.export_zip(dest_path)
+            return self._merge_operation_result(session_state, result)
+        if action_key == "import-zip":
+            zip_path = str(payload.get("zip_path") or "").strip()
+            if not zip_path:
+                raise ValueError("zip_path is required for import-zip")
+            result = self.services.import_zip(zip_path)
             return self._merge_operation_result(session_state, result)
         raise ValueError(f"unsupported desktop action: {action_key}")
 

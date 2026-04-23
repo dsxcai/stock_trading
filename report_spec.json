@@ -340,6 +340,8 @@
           { "header": "Side", "value": { "path": "side" } },
           { "header": "Time (TW)", "value": { "path": "time_tw" }, "format": "datetime" },
           { "header": "Price", "value": { "path": "price" }, "format": "p4", "align": "right" },
+          { "header": "Buy Basis", "value": { "path": "buy_price" }, "format": "p4", "align": "right" },
+          { "header": "Realized P&L", "value": { "path": "realized_pnl" }, "format": "usd2", "align": "right" },
           { "header": "Shares", "value": { "path": "shares" }, "format": "int", "align": "right" },
           { "header": "Gross", "value": { "path": "gross" }, "format": "usd2", "align": "right" },
           { "header": "Buy Fee", "value": { "path": "buy_fee" }, "format": "usd2", "align": "right" },
@@ -365,6 +367,7 @@
             "cells": {
               "Shares": { "path": "totals.shares", "format": "int" },
               "Gross": { "path": "totals.gross", "format": "usd2" },
+              "Realized P&L": { "path": "totals.realized_pnl", "format": "usd2" },
               "Buy Fee": { "path": "totals.buy_fee", "format": "usd2" },
               "Sell Fee": { "path": "totals.sell_fee", "format": "usd2" },
               "Net Cash": { "path": "totals.cash_effect", "format": "usd2" }

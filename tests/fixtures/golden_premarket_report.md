@@ -58,12 +58,12 @@ Note: Price (Now) = Close(t) in Premarket / AfterClose. In Intraday, it is the c
 
 ## Trade Details
 ### Trade Date (ET): 2026-03-20
-| Trade ID | Ticker | Side | Time (TW) | Price | Shares | Gross | Buy Fee | Sell Fee | Net Cash | Cash Basis | Fee Rate | Notes |
-| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |
-| 103 | ARKQ | BUY | 2026/03/20 21:36:32 | 118.0000 | 2 | $236.00 | $0.47 | - | $-236.47 | - | - | Imported from Capital XLS (ARKQ ARKQUS) |
-| 102 | SMH | BUY | 2026/03/20 21:34:37 | 393.9320 | 14 | $5,515.05 | $11.03 | - | $-5,526.08 | - | - | Imported from Capital XLS (SMH VanEck半導體ETF) |
-| 101 | NVDA | SELL | 2026/03/20 21:31:18 | 177.2000 | 33 | $5,847.60 | - | $11.70 | $5,835.90 | - | - | Imported from Capital XLS (NVDA 輝達) |
-| Total | - | - | - | - | 49 | $11,598.65 | $11.50 | $11.70 | $73.35 | - | - | - |
+| Trade ID | Ticker | Side | Time (TW) | Price | Buy Basis | Realized P&L | Shares | Gross | Buy Fee | Sell Fee | Net Cash | Cash Basis | Fee Rate | Notes |
+| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |
+| 103 | ARKQ | BUY | 2026/03/20 21:36:32 | 118.0000 | - | - | 2 | $236.00 | $0.47 | - | $-236.47 | - | - | Imported from Capital XLS (ARKQ ARKQUS) |
+| 102 | SMH | BUY | 2026/03/20 21:34:37 | 393.9320 | - | - | 14 | $5,515.05 | $11.03 | - | $-5,526.08 | - | - | Imported from Capital XLS (SMH VanEck半導體ETF) |
+| 101 | NVDA | SELL | 2026/03/20 21:31:18 | 177.2000 | 184.9182 | $-266.40 | 33 | $5,847.60 | - | $11.70 | $5,835.90 | - | - | Imported from Capital XLS (NVDA 輝達) |
+| Total | - | - | - | - | - | $-266.40 | 49 | $11,598.65 | $11.50 | $11.70 | $73.35 | - | - | - |
 
 ### Trade Date (ET): 2026-03-17
 | Trade ID | Ticker | Side | Time (TW) | Shares | Net Cash |

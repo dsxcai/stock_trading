@@ -18,6 +18,11 @@ const desktopApi = {
   saveRuntimeConfig: (payload: Record<string, unknown>) => ipcRenderer.invoke("desktop:save-runtime-config", payload),
   saveSignalConfig: (payload: Record<string, unknown>) => ipcRenderer.invoke("desktop:save-signal-config", payload),
   pickCapitalXls: () => ipcRenderer.invoke("desktop:pick-capital-xls"),
+  pickZipFile: () => ipcRenderer.invoke("desktop:pick-zip-file"),
+  saveZipPath: () => ipcRenderer.invoke("desktop:save-zip-path"),
+  initCleanEnv: () => ipcRenderer.invoke("desktop:init-clean-env"),
+  exportZip: (payload: Record<string, unknown>) => ipcRenderer.invoke("desktop:export-zip", payload),
+  importZip: (payload: Record<string, unknown>) => ipcRenderer.invoke("desktop:import-zip", payload),
   reloadApplication: () => ipcRenderer.invoke("desktop:reload-application"),
   closeApplication: () => ipcRenderer.invoke("desktop:close-application"),
 };
